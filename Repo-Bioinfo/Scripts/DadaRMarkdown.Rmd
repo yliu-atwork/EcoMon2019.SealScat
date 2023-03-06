@@ -1,0 +1,61 @@
+---
+title: "Test"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+#Install dada2; the newest version as of 3/24/2022 is Version 1.18
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("dada2", version = "3.11")
+
+library("phyloseq"); packageVersion("phyloseq")
+
+#install and load other libraries needed
+
+library (tidyverse)
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+BiocManager::install("dada2", version = "3.14")
+library (dada2);packageVersion("dada2")
+
+library (digest)
+
+BiocManager::install("seqinr")
+library (seqinr)
+library (knitr)
+
+BiocManager::install("kableExtra")
+library (kableExtra); packageVersion("kableExtra")
+
+#Zach for Mark:
+#BiocManager::install(c("ShortRead", "Biostrings"))
+#library(ShortRead)
+#library(Biostrings)
+#library(dplyr)
+
+# getwd()
+path <- "C:/Users/Yuan.Liu/Desktop/Runs-combined"
+list.files(path)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r load files, echo=FALSE}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
