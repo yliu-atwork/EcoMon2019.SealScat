@@ -1,0 +1,20 @@
+Seq 18 and Seq110 both match 100% to Winter flounder.
+However, Seq 18 also matches 100% to Yellowtail flounder while Seq110 matches 100% to American plaice.
+This is to say either: 1) there are real biological ASV haplotypes that are not caused by sequencing error.
+2)Sequencing error caused the 2 bases difference between Seq110 and Seq18 (the mismatch is along the mid section of sequence tho),
+and the perfect match to Seq110 in GenBank identified as winter flounder was a mis-d
+
+Seq490 also matches 100% to Winter and Yellowtail flounder. 
+However, Seq490 and Seq 18 have 2-base differences (at the reverse primer site)
+
+If sequencing errors indeed contributed to generating multiple versions of winter/yellowtail flounder and American Plaice sequence,
+it is then likely Seq110, Seq 796, and the rest sequences (mainstream version) represent only 3 versions of winter flounder sequences.
+Seq 110 (Winter Flounder or American Plaice) differs from the mainstream version by 2 bases. Seq 110 also hits with only 1 ref Winter Flounder.
+Seq 796 also differs from the mainstream version by 2 bases.
+
+It turns out Seq 18, Seq 110 and Seq 490 are the only 3 that occurred in EcoMon samples (the rest were only among fecal samples).
+Lesson: I need to check ID not from the original tax list, but from the data matrix (be it EcoMon or Seal Scat)with Seq names. 
+Seq 18 and Seq 490 are practically the same, without considering the primer site (rever primer site has 1 base difference)
+Seq 110 differ from Seq 18 and Seq 490 in the middle section of sequence. It seems real. The ref sequence submitter seems legit as well.
+So do Seq 110 and Seq 18 really represent the same species, Winter Flounder?
+ 

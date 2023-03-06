@@ -1,0 +1,256 @@
+---
+title: "eDNA.Analysis.Part.3"
+author: "Emily Speciale"
+date: "7/15/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+Through Part 1 and Part 2 of our analysis, we have found that species richness exhibits a strong correlation with filtration volume, depth type, and longitude. Our next step is to explore whether the data we find from our eDNA sampling matches to the data found from hydroacoustic studies. Active acoustic data was taken on the cruise, and this acoustic data overlaps with the eDNA sampling locations. 
+
+## Methods
+
+Based on Part 1, we will only use samples filtered at a volume of 2 L for our analysis. 
+
+```{r loading and wrangling data}
+# read in functions
+source("D:/Hollings-2022/acoustic-eDNA-main/Rcode/classification_functions.R")
+source("D:/Hollings-2022/acoustic-eDNA-main/Rcode/emily_functions.R")
+# read in unfiltered data set for GU201905 data
+library(readxl)
+data <- read_excel('D:/GU201905/Copy_DNA_extracts_Qubit.xlsx', sheet = 'R.Station.vs.DNA')
+# filter and wrangle data for only Niskin bottle samples and 2 L filtration volumes
+# filter and wrangle data for only Niskin bottle samples and only Casts < 20
+dat.nisk.2 <- data %>% 
+   filter (Gear == "Niskin", Filtration.Volume == 2) %>%  #Casts 20+ only sampled 2 liters
+   dplyr::select (Station, Cast, Lat, Long, Sampling.Depth.Type, Sampling.Depth.Meter, Depth, Filtration.Volume, X.12S.final, Filt.Time) 
+ dat.nisk.2$Filt.Time <- as.POSIXlt(dat.nisk.2$Filt.Time, format = '%H:%M') 
+str(dat.nisk.2)
+table(dat.nisk.2$Sampling.Depth.Type, dat.nisk.2$Sampling.Depth.Meter)
+dat.nisk.2$Filt.Mins <- dat.nisk.2$Filt.Time$hour*60 + dat.nisk.2$Filt.Time$min 
+head(dat.nisk.2$Filt.Mins) # some samples have no time measured
+
+dat.nisk.2 <- dat.nisk.2 %>% 
+  transform(Sampling.Depth.Type=factor(Sampling.Depth.Type,levels=c("Sfc", "Chl.max", "Mid", "Btm"))) %>% 
+  transform(X.12S.final=factor(X.12S.final,levels=c("No", "EL", "L", "M", "H")))
+table(dat.nisk.2$Sampling.Depth.Type, dat.nisk.2$X.12S.final)
+
+names(dat.nisk.2)[names(dat.nisk.2) == "Depth"] <- "Total.Depth"
+```
+
+Quantitative eDNA data was transformed and wrangled in Excel so that total read count was calculated. This data set includes both the total read count per sample as well as individual read counts from each Sequence (Seq represents an individual organism). We can use this data to calculate number of taxa per sample.
+
+```{r adding in read count and number of taxa as variables}
+# read in quantitative eDNA data
+edna.data <- read_excel("D:/GU201905/EcoMon2019FishPrimer.xlsx", sheet = "Species.Station.Data")
+# filter any Niskin or MiSeq samples
+edna.data <- edna.data[!grepl("MiSeq", edna.data$NGS.Platform),]
+edna.data <- edna.data[grep("Niskin", edna.data$Gear),]
+# calculate number of taxa/species by turning any value in a Seq column into a 1 and taking the sum
+taxa.data <- edna.data %>% mutate_at(-c(1:7), ~1 * (. != 0))
+taxa.data <- taxa.data %>% mutate(Number.Species = rowSums(dplyr::select(., -c(1:7))))
+# filter data frame so it does not have all the Seq columns
+taxa.data <- taxa.data %>% dplyr::select(Station, Read.Count, Sampling.Depth.Meter, Sampling.Depth.Type, Filtration.Volume, Number.Species,)
+# merge with dat.niskin
+dat.nisk.2 <- merge(dat.nisk.2, taxa.data, by = c("Station","Filtration.Volume", "Sampling.Depth.Type", "Sampling.Depth.Meter"))
+
+```
+
+Shannon Index is a measure of species diversity; a high Shannon Index indicates a large number of species with even dominance, whereas a low Shannon Index indicates less species and/or a more dominant species. We can also use the quantitative eDNA file to calculate the Index and add it to our overall dataset.
+
+```{r adding in Shannon Index as a variable}
+# make new data frame for calculating Shannon Index
+shan.data <- edna.data
+# use the vegan package to create a new column that calculates Shannon Index
+library(vegan)
+shan.data$Shannon.Index <- diversity(shan.data [-c(1:7)], index="shannon")
+# filter data frame so it does not have all the Seq columns
+shan.data <- shan.data %>% dplyr::select(Station, Read.Count, Sampling.Depth.Meter, Sampling.Depth.Type, Filtration.Volume, Shannon.Index,)
+# merge with dat.niskin
+dat.nisk.2 <- merge(dat.nisk.2, shan.data, by = c("Station","Filtration.Volume", "Read.Count", "Sampling.Depth.Type", "Sampling.Depth.Meter"))
+```
+
+Now we can merge our eDNA data set with its corresponding acoustic backscatter (ABC) data. 
+
+```{r merging eDNA with ABC}
+# read in json file
+abc.data <- jsonlite::fromJSON("D:/GU201905/eDNA_Data/mfi_abc.json")
+# unpack all casts ABC data into one data frame
+library(tibble)
+abc.df <- enframe(unlist(abc.data))
+abc.df <- abc.df %>% separate(name, into = c(paste0("x", 1:2)))
+colnames(abc.df) <- list("Cast", "ABC.Depth", "ABC")
+# merge data sets
+df <- merge(dat.nisk.2, abc.df) 
+# filter so that we don't have mismatched data points
+df <- df %>% filter(df$ABC.Depth == df$Sampling.Depth.Meter | 
+                      df$Sampling.Depth.Meter + 5 >= df$ABC.Depth & 
+                      df$ABC.Depth >= df$Sampling.Depth.Meter - 5)
+df <- df %>% filter(as.numeric(df$ABC.Depth) + 5 >= df$Sampling.Depth.Meter & 
+                          df$Sampling.Depth.Meter >= as.numeric(df$ABC.Depth) - 5)
+# add a column that shows the log of each ABC value
+df$log.ABC = log(df$ABC)
+# write a csv for the data frame
+write.csv(df, "D:/GU201905/eDNA_Data/edna_abc.csv")
+
+```
+
+## Data Analysis
+
+Now that we've wrangled our data into the right format, we can begin to test and plot our data in several ways. First, it would be interesting to see if there are any direct correlations between our variables (read count, species richness, & Shannon Index) with ABC. We would expect a positive correlation for all of them. 
+
+```{r correlating eDNA and ABC}
+# run a simple pearson correlation test between variables and ABC
+cor.test(df$Read.Count, df$ABC, method = c("pearson"))
+scatter_plot(df, Read.Count, ABC) +
+  labs(x="Read Count", y = "ABC") +
+  ggtitle("ABC vs Read Count for 2 L Samples")
+cor.test(df$Number.Species, df$ABC, method = c("pearson"))
+scatter_plot(df, Number.Species, ABC) +
+  labs(x="Species Richness", y = "ABC") +
+  ggtitle("ABC vs Species Richness for 2 L Samples")
+cor.test(df$Shannon.Index, df$ABC, method = c("pearson"))
+scatter_plot(df, Shannon.Index, ABC) +
+  labs(x="Shannon Index", y = "ABC") +
+  ggtitle("ABC vs Shannon Index for 2 L Samples")
+```
+We do not see any correlations between our eDNA variables with hydroacoustics. Hydroacoustics make an instant measurement of the water whereas eDNA samples collected at one location have most likely flowed from another location, which could explain the disparity.
+
+
+Maybe run anova test, categorize by high and low and mid ABC?
+```{r ABC vs depth}
+# making new column for proportion of water column that each data point lies at
+df$ABC.Depth <- as.numeric(df$ABC.Depth)
+df$Relative.Depth <- (df$ABC.Depth / df$Total.Depth) * 100
+# grouping by proportion into four categories
+df <- df %>% mutate(Depth.Bins = case_when(
+  Relative.Depth <= 25  ~ "Shallow",
+  Relative.Depth > 25 & Relative.Depth <= 50  ~ "Mid",
+  Relative.Depth > 50 & Relative.Depth <= 75 ~ "Deep",
+  Relative.Depth > 75 ~ "Bottom")
+)
+# simple correlation test and scatter plots between relative depth and ABC
+cor.test(df$Relative.Depth, df$ABC, method = c("pearson"))
+scatter_plot(df, ABC, Relative.Depth) + 
+  scale_y_reverse() +
+  labs(x = "ABC", y = "Relative Depth (%)") +
+  ggtitle("ABC vs. Relative Depth of 2 L Samples in the Water Column")
+# summary tables for relative depth type
+summary_table(df, Depth.Bins, ABC)
+# anova tests for variables vs relative depth type
+aov.abc <- aov(ABC ~ Depth.Bins, data = df)
+summary(aov.abc)
+```
+
+```{r ABC vs longitude}
+# simple correlation test and scatter plots between longitude and ABC
+cor.test(df$Long, df$ABC, method = c("pearson"))
+scatter_plot(df, Long, ABC) + 
+  labs(x = "Longitude", y = "ABC") +
+  ggtitle("ABC vs. Longitude of 2 L Samples in the Water Column")
+# grouping by station to take average ABC
+df.map <- df %>%
+  group_by(Station) %>%
+  summarise_all("mean")
+# making map figure
+library(ggspatial)
+library(mapdata); library(marmap)
+library(raster); library(rgdal); library(rgeos)
+library(rnaturalearth); library(rnaturalearthdata) 
+library(sf); library(viridis)
+
+namerica <- ne_countries(scale = 'medium', type = 'countries', continent = 'north america', returnclass = "sf")
+
+dat.niskin.sf <- st_as_sf(dat.nisk.2, coords = c('Long','Lat'), crs = 4326) 
+ 
+b <- getNOAA.bathy (lon1 = -77, lon2 = -64, lat1 = 35, lat2 = 43, res=1) # Turns out 1 is the finest resolution
+bathyLat = as.numeric(colnames(b)); bathyLon = as.numeric(rownames(b))
+bathyZ = as.numeric(b); dim(bathyZ) = dim(b)
+bf = fortify.bathy(b) # explicedly spatial?
+
+map <- ggplot(namerica) +
+  geom_sf(fill = "darkgray") +
+  geom_contour(data=bf, aes(x=x, y=y, z=z), breaks=c(-100), size=c(0.3), colour="grey") + # add 100m contour
+  geom_contour(data=bf, aes(x=x, y=y, z=z), breaks=c(-250), size=c(0.6), colour="grey") + # add 250m contour
+  #geom_sf(data=dat.nisk.2.sf, size = 2, shape = 19, fill ="red") +
+  coord_sf( xlim = c(-76, -65), ylim = c(35, 43) ) +
+  labs(x="Longitude", y="Latitude") +
+  annotate(geom = "text", x = -70, y = 37, label = "Atlantic Ocean", color = "grey22", size = 4.5)
+
+map + geom_point(data = df.map, size = 4, aes(x = Long, y = Lat, color = ABC)) +
+  scale_color_viridis(option = "C", trans = "reverse") +
+  labs(x = "Longitude", y = "Latitude", color = "ABC") + 
+  ggtitle("ABC per 2 L Sampling Location")
+```
+
+So it seems there is a mismatch between the eDNA and acoustic data. But we hypothesize that because swimbladder fish produce stronger signals than non-swimbladder fish, maybe the correlation with eDNA only exists for fish with swimbladders. 
+
+```{r ABC vs swimbladder fish}
+# merge species data with other data
+swim.data <- merge(dat.nisk.2, edna.data, by = c("Station","Filtration.Volume", "Sampling.Depth.Type", "Sampling.Depth.Meter", "Read.Count"))
+# rid of filt time because its giving an error
+swim.data <- swim.data %>% dplyr::select(-Filt.Time)
+# melt data frame so each species/depth/location has its own row
+swim.data <- melt(swim.data, measure.vars = c(16:153), variable.name = "Species", value.name = "Species.Read.Count")
+# read in base taxonomy info
+taxa.info <- read_excel("C:/Users/emily.speciale/Desktop/taxa_info.xlsx")
+taxa.info <- taxa.info %>% dplyr::select(Taxonomy.Latin.x, Taxonomy.Common.x, Swimbladder, Habitat)
+names(taxa.info)[names(taxa.info) == "Taxonomy.Latin.x"] <- "Species"
+names(taxa.info)[names(taxa.info) == "Taxonomy.Common.x"] <- "Common.Name"
+# merge data sets
+swim.data <- merge(swim.data, taxa.info, by = "Species", all.x = TRUE)
+# make depth bins
+swim.data$Relative.Depth <- (swim.data$Sampling.Depth.Meter / swim.data$Total.Depth) * 100
+swim.data <- swim.data %>% mutate(Depth.Bins = case_when(
+  Relative.Depth <= 25  ~ "Shallow",
+  Relative.Depth > 25 & Relative.Depth <= 50  ~ "Mid",
+  Relative.Depth > 50 & Relative.Depth <= 75 ~ "Deep",
+  Relative.Depth > 75 ~ "Bottom")
+)
+# filter out any rows where species read count is 0
+swim.data <- swim.data %>% filter(Species.Read.Count > 0)
+# merge data set with abc data
+swim.data <- merge(swim.data, abc.df) 
+# filter so that we don't have mismatched data points
+swim.data <- swim.data %>% dplyr::filter(swim.data$ABC.Depth == swim.data$Sampling.Depth.Meter | 
+                      swim.data$Sampling.Depth.Meter + 5 >= swim.data$ABC.Depth & 
+                      swim.data$ABC.Depth >= swim.data$Sampling.Depth.Meter - 5)
+swim.data <- swim.data %>% dplyr::filter(as.numeric(swim.data$ABC.Depth) + 5 >= swim.data$Sampling.Depth.Meter & 
+                          swim.data$Sampling.Depth.Meter >= as.numeric(swim.data$ABC.Depth) - 5)
+# calculating % of swimbladder
+swim.data <- swim.data %>% group_by(Cast, ABC.Depth, Sampling.Depth.Meter, Read.Count, Swimbladder) %>%
+  dplyr::summarize(
+    count = n(), 
+    sum = sum(Species.Read.Count),
+    #percent = sum / Read.Count * 100
+  )
+
+swim.data$Percent <- swim.data$sum / swim.data$Read.Count * 100
+
+# merge with abc data 
+swim.data <- merge(swim.data, abc.df, by = c("Cast", "ABC.Depth"))
+
+# filter so there is only data on swimbladders
+swim.data <- swim.data %>% dplyr::filter(Swimbladder %in% c("physoclistous", "physostomous"))
+
+# combine all swimbladder percents into one measurement
+swim.data <- swim.data %>% group_by(Cast, ABC.Depth, Sampling.Depth.Meter, Read.Count, ABC) %>%
+  dplyr::summarize(
+    Percent.Swimbladder = sum(Percent)
+  )
+
+# log of 10 column for ABC
+swim.data$log.ABC <- 10* log10(swim.data$ABC)
+# correlation testing
+cor.test(swim.data$Percent.Swimbladder, swim.data$log.ABC, method = c("pearson"))
+scatter_plot(swim.data, Percent.Swimbladder, log.ABC)
+
+```
+
+
+

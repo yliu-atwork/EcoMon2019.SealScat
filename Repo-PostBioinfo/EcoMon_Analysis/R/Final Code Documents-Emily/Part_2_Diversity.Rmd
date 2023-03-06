@@ -1,0 +1,383 @@
+---
+title: "eDNA.Analysis.Part.2"
+author: "Emily Speciale"
+date: "7/8/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+eDNA is relatively new, especially in open marine habitats. Here we used a stratified transect sampling design from near shore to continental shelf habitats, and across a vertical profile from the surface to (max. depth). We have an expectation that SR will decrease with respect to depth and decrease with respect to latitude but not sure if that is a steady gradient or how species will change across these comparison.
+
+## Methods
+
+Based on Part 1, we will only use samples filtered at a volume of 2 L for our analysis. 
+
+```{r loading and wrangling data}
+# read in functions
+source("D:/Hollings-2022/acoustic-eDNA-main/Rcode/emily_functions.R")
+# read in unfiltered data set for GU201905 data
+library(readxl)
+data <- read_excel('D:/GU201905/Copy_DNA_extracts_Qubit.xlsx', sheet = 'R.Station.vs.DNA')
+# filter and wrangle data for only Niskin bottle samples and 2 L filtration volumes
+# filter and wrangle data for only Niskin bottle samples and only Casts < 20
+dat.nisk.2 <- data %>% 
+   filter (Gear == "Niskin", Filtration.Volume == 2) %>%  #Casts 20+ only sampled 2 liters
+   dplyr::select (Station, Cast, Lat, Long, Sampling.Depth.Type, Sampling.Depth.Meter, Depth, Filtration.Volume, X.12S.final, Filt.Time) 
+ dat.nisk.2$Filt.Time <- as.POSIXlt(dat.nisk.2$Filt.Time, format = '%H:%M') 
+str(dat.nisk.2)
+table(dat.nisk.2$Sampling.Depth.Type, dat.nisk.2$Sampling.Depth.Meter)
+dat.nisk.2$Filt.Mins <- dat.nisk.2$Filt.Time$hour*60 + dat.nisk.2$Filt.Time$min 
+head(dat.nisk.2$Filt.Mins) # some samples have no time measured
+
+dat.nisk.2 <- dat.nisk.2 %>% 
+  transform(Sampling.Depth.Type=factor(Sampling.Depth.Type,levels=c("Sfc", "Chl.max", "Mid", "Btm"))) %>% 
+  transform(X.12S.final=factor(X.12S.final,levels=c("No", "EL", "L", "M", "H")))
+table(dat.nisk.2$Sampling.Depth.Type, dat.nisk.2$X.12S.final)
+
+names(dat.nisk.2)[names(dat.nisk.2) == "Depth"] <- "Total.Depth"
+
+```
+We can quickly map where these samples were taken.
+
+```{r map, message = FALSE}
+library(ggspatial)
+library(mapdata); library(marmap)
+library(raster); library(rgdal); library(rgeos)
+library(rnaturalearth); library(rnaturalearthdata) 
+library(sf)
+
+namerica <- ne_countries(scale = 'medium', type = 'countries', continent = 'north america', returnclass = "sf")
+
+dat.nisk.2.sf <- st_as_sf(dat.nisk.2, coords = c('Long','Lat'), crs = 4326) 
+ 
+b <- getNOAA.bathy (lon1 = -77, lon2 = -64, lat1 = 35, lat2 = 43, res=1) # Turns out 1 is the finest resolution
+bathyLat = as.numeric(colnames(b)); bathyLon = as.numeric(rownames(b))
+bathyZ = as.numeric(b); dim(bathyZ) = dim(b)
+bf = fortify.bathy(b) # explicedly spatial?
+
+ggplot(namerica) +
+  geom_sf(fill = "darkgreen") +
+  geom_contour(data=bf, aes(x=x, y=y, z=z), breaks=c(-100), size=c(0.3), colour="darkblue") + # add 100m contour
+  geom_contour(data=bf, aes(x=x, y=y, z=z), breaks=c(-250), size=c(0.6), colour="darkblue") + # add 250m contour
+  geom_sf(data=dat.nisk.2.sf, size = 3, shape = 19, fill ="red") +
+  coord_sf( xlim = c(-76, -65), ylim = c(35, 43) ) +
+  labs(x="Longitude", y="Latitude") +
+  annotate(geom = "text", x = -73.75, y = 43, label = "19 Niskin cast stations", color="white", size=4) +
+  annotate(geom = "text", x = -70, y = 37, label = "Atlantic Ocean", color = "grey22", size = 4.5) 
+ 
+
+```
+Quantitative eDNA data was transformed and wrangled in Excel so that total read count was calculated. This data set includes both the total read count per sample as well as individual read counts from each Sequence (Seq represents an individual organism). We can use this data to calculate number of taxa per sample.
+
+```{r adding in read count and number of taxa as variables}
+# read in quantitative eDNA data
+edna.data <- read_excel("D:/GU201905/EcoMon2019FishPrimer.xlsx", sheet = "Station.Count")
+# filter any Niskin or MiSeq samples
+edna.data <- edna.data[!grepl("MiSeq", edna.data$NGS.Platform),]
+edna.data <- edna.data[grep("Niskin", edna.data$Gear),]
+# calculate number of taxa/species by turning any value in a Seq column into a 1 and taking the sum
+taxa.data <- edna.data %>% mutate_at(-c(1:7), ~1 * (. != 0))
+taxa.data <- taxa.data %>% mutate(Number.Species = rowSums(dplyr::select(., -c(1:7))))
+# filter data frame so it does not have all the Seq columns
+taxa.data <- taxa.data %>% dplyr::select(Station, Read.Count, Sampling.Depth.Meter, Sampling.Depth.Type, Filtration.Volume, Number.Species,)
+# merge with dat.niskin
+dat.nisk.2 <- merge(dat.nisk.2, taxa.data, by = c("Station","Filtration.Volume", "Sampling.Depth.Type", "Sampling.Depth.Meter"))
+```
+
+Shannon Index is a measure of species diversity; a high Shannon Index indicates a large number of species with even dominance, whereas a low Shannon Index indicates less species and/or a more dominant species. We can also use the quantitative eDNA file to calculate the Index and add it to our overall dataset.
+
+```{r adding in Shannon Index as a variable}
+# make new data frame for calculating Shannon Index
+shan.data <- edna.data
+# use the vegan package to create a new column that calculates Shannon Index
+library(vegan)
+shan.data$Shannon.Index <- diversity(shan.data [-c(1:7)], index="shannon")
+# filter data frame so it does not have all the Seq columns
+shan.data <- shan.data %>% dplyr::select(Station, Read.Count, Sampling.Depth.Meter, Sampling.Depth.Type, Filtration.Volume, Shannon.Index,)
+# merge with dat.niskin
+dat.nisk.2 <- merge(dat.nisk.2, shan.data, by = c("Station","Filtration.Volume", "Read.Count", "Sampling.Depth.Type", "Sampling.Depth.Meter"))
+```
+
+
+## eDNA with Depth
+
+There are several ways we can look at depth vs our eDNA variables. First, we can test the correlation between the sampling depth (m) and our variables, to see if there is any direct relationship. 
+
+Read count is a great indicator for calculating number of taxa and relative abundance of species to one another (such as for Shannon Index). However, the numbers for read count do not accurately represent total abundance due to several reasons (?). Thus, we decided to discontinue using read count as a variable, and only focus on species richness and Shannon Index.  
+
+```{r stat testing with sampling depth (m) }
+# simple correlation test between sampling depth and variables
+cor.test(dat.nisk.2$Sampling.Depth.Meter, dat.nisk.2$Number.Species, method = c("pearson"))
+scatter_plot(dat.nisk.2, Sampling.Depth.Meter, Number.Species)
+cor.test(dat.nisk.2$Sampling.Depth.Meter, dat.nisk.2$Shannon.Index, method = c("pearson"))
+scatter_plot(dat.nisk.2, Sampling.Depth.Meter, Shannon.Index)
+```
+Our results show no direct quantitative correlation between sampling depth (m) and our variables. But this makes sense since different samples have different depths. For instance, eDNA taken at 30 m may be in the middle of the water column for one sample, but be at the bottom for another. Thus, it may be more telling to categorize our data points into depth types based on where they are in their respective water columns. We were given categories for depth type with our data, which qualitatively tell us if a sample was taken near the surface, the chlorophyll max, the middle, or the bottom of the water column. We can test using ANOVA if these depth types are significantly different among our variables.
+
+```{r sampling depth type}
+# summary tables for depth type
+summary_table(dat.nisk.2, Sampling.Depth.Type, Number.Species)
+summary_table(dat.nisk.2, Sampling.Depth.Type, Shannon.Index)
+# box plots for depth type
+dat.nisk.2 <- dat.nisk.2 %>% transform(Sampling.Depth.Type=factor(Sampling.Depth.Type,levels=c("Btm", "Mid", "Chl.max", "Sfc")))
+box_plot(data=dat.nisk.2, x=Sampling.Depth.Type, y=Number.Species) + 
+  labs(x="Sampling Depth Type", y="Number of Taxa") +
+  ggtitle("Number of Taxa Distribution for Sampling Depth Type")
+box_plot(data=dat.nisk.2, x=Sampling.Depth.Type, y=Shannon.Index) + 
+  labs(x="Sampling Depth Type", y="Shannon Index") +
+  ggtitle("Shannon Index Distribution for Sampling Depth Type")
+# anova tests 
+aov.taxa.1 <- aov(Number.Species ~ Sampling.Depth.Type, data = dat.nisk.2)
+summary(aov.taxa.1)
+aov.shan.1 <- aov(Shannon.Index ~ Sampling.Depth.Type, data = dat.nisk.2)
+summary(aov.shan.1)
+# tukey tests for significant results
+tukey.taxa.1 <- TukeyHSD(aov.taxa.1)
+tukey.taxa.1
+tukey.shan.1 <- TukeyHSD(aov.shan.1)
+tukey.shan.1
+```
+This statistical testing leads to interesting results. For number of taxa, we find that the difference between the middle and bottom is significant (p = 0.039), as well as the difference between the chl.max and the bottom (p = 0.025). The difference between the surface and bottom is on the edge of significance (p = 0.051). For Shannon Index, the only significance occurs between the chl.max and bottom (p = 0.022). When looking at our summary tables, we can see that the bottom has a mean number of taxa of 10.22 and Shannon Index of 1.61. This is a large effect size compared to the other depth types, which range from 5.45 taxa (chl.max) to 6.52 taxa, and a Shannon Index of 0.97 (chl.max) to 1.61.
+
+However, these categorical depth types are not completely accurate. The maximum eDNA sampling depth was 500 m, and any samples taken at this depth were labelled as Btm, even if the total depth went much further. Essentially, there may be discrepancies between the labelled depth type and actual depth type. One way we can tackle this problem is to standardize our depths on a scale from 0-100. If we divide our sampled depth by the total depth of its water column, we can get a proportion. We can use this proportion to accurately compare the relationship of relative depth to our variables both categorically and quantitatively. 
+
+```{r calculating percent of water column}
+# making new column for proportion of water column that each data point lies at
+dat.nisk.2$Relative.Depth <- (dat.nisk.2$Sampling.Depth.Meter / dat.nisk.2$Total.Depth) * 100
+# grouping by proportion into four categories
+dat.nisk.2 <- dat.nisk.2 %>% mutate(Depth.Bins = case_when(
+  Relative.Depth <= 25  ~ "Shallow",
+  Relative.Depth > 25 & Relative.Depth <= 50  ~ "Mid",
+  Relative.Depth > 50 & Relative.Depth <= 75 ~ "Deep",
+  Relative.Depth > 75 ~ "Bottom")
+)
+
+```
+
+First, let's run a quantitative correlation test to see if there is a direct relationship between relative depth (%) and our eDNA variables.
+
+```{r relative depth quantitative}
+# simple correlation test and scatter plots between relative depth and variables
+cor.test(dat.nisk.2$Relative.Depth, dat.nisk.2$Number.Species, method = c("pearson"))
+scatter_plot(dat.nisk.2, Number.Species, Relative.Depth) + 
+  scale_y_reverse() +
+  theme_bw() +
+  labs(x = "Species Richness", y = "Relative Depth (%)") +
+  ggtitle("Species Richness vs. Relative Depth of 2 L Samples in the Water Column")
+cor.test(dat.nisk.2$Relative.Depth, dat.nisk.2$Shannon.Index, method = c("pearson"))
+scatter_plot(dat.nisk.2, Shannon.Index, Relative.Depth) +
+  scale_y_reverse() + 
+  theme_bw() +
+  labs(x = "Shannon-Wiener Index", y = "Relative Depth (%)") +
+  ggtitle("Shannon-Wiener Index vs. Relative Depth of 2 L Samples in the Water Column")
+
+ggplot(dat.nisk.2, aes(x = Shannon.Index, y = Relative.Depth)) +
+    geom_point() +
+    geom_smooth(method = lm) +
+    scale_y_reverse() + theme_bw() + labs(x = "Shannon-Wiener Index", y = "Relative Depth (%)") 
+
+```
+By standardizing our sampling depths, we find a much more significant correlation with number of taxa (p = 0.0.0009) and Shannon Index (p = 0.0019)! Interestingly, we see a positive correlation, meaning that as relative depth increases (towards the bottom), the number of taxa and Shannon Index also increase. Let's now categorize the relative depth data into four depth groups to see if there are significant differences between their means/medians.
+
+```{r relative depth categorized}
+# summary tables for relative depth type
+summary_table(dat.nisk.2, Depth.Bins, Number.Species)
+summary_table(dat.nisk.2, Depth.Bins, Shannon.Index)
+# box plots for relative depth type
+dat.nisk.2 <- dat.nisk.2 %>% transform(Depth.Bins=factor(Depth.Bins,levels=c("Bottom", "Deep", "Mid", "Shallow")))
+box_plot(data=dat.nisk.2, x=Depth.Bins, y=Number.Species) + 
+  labs(x="Relative Depth Type", y="Number of Taxa") +
+  ggtitle("Number of Taxa Distribution for Relative Depth Type")
+box_plot(data=dat.nisk.2, x=Depth.Bins, y=Shannon.Index) + 
+  labs(x="Relative Depth Type", y="Shannon Index") +
+  ggtitle("Shannon Index Distribution for Relative Depth Type")
+# anova tests for variables vs relative depth type
+aov.taxa.2 <- aov(Number.Species ~ Depth.Bins, data = dat.nisk.2)
+summary(aov.taxa.2)
+aov.shan.2 <- aov(Shannon.Index ~ Depth.Bins, data = dat.nisk.2)
+summary(aov.shan.2)
+# tukey tests for significant results
+tukey.taxa.2 <- TukeyHSD(aov.taxa.2)
+tukey.taxa.2
+tukey.shan.2 <- TukeyHSD(aov.shan.2)
+tukey.shan.2
+
+```
+Yet again, we see significant results between our new categories for depth type. For species richness, there are significant differences in the means of samples in the shallow and bottom depths (p = 0.001) as well as the mid and bottom depths (p = 0.0498). This is also true for Shannon Index (p = 0.002 and p = 0.046 respectively). The mean number of taxa for the bottom rose to 10.875. 
+
+
+## eDNA with latitude and longitude
+
+We are curious to see if other factors beyond water column depth affect species richness and evenness. We would like to see if the location of our sampling sites affected our measurements, specifically with latitude and longitude. The cruise sampled eDNA from approximately 36 N, 76 W to 42 N, 66 W, in the northeast Atlantic ocean. We expect to see an increase of species richness as we move south to warmer waters, as well as a decrease in species richness as we move away from the coastline. 
+
+First, let's test for statistical significance by running pearson correlation tests for individual relationships, and then a multivariable regression model in which our variables are tested against relative depth, latitude, and longitude. 
+
+```{r statistical testing for lat/lon}
+# correlation tests and scatter plots for species richness with lat/lon
+cor.test(dat.nisk.2$Lat, dat.nisk.2$Number.Species, method = "pearson")
+scatter_plot(dat.nisk.2, Number.Species, Lat) +
+  labs(x = "Species Richness", y = "Latitude") + 
+  ggtitle("Species Richness vs. Latitude for 2 L Samples")
+cor.test(dat.nisk.2$Long, dat.nisk.2$Number.Species, method = "pearson")
+scatter_plot(dat.nisk.2, Long, Number.Species) +
+  labs(x = "Longitude", y = "Species Richness") + 
+  ggtitle("Species Richness vs. Longitude for 2 L Samples")
+# correlation tests and scatter plots for Shannon Index with lat/lon
+cor.test(dat.nisk.2$Lat, dat.nisk.2$Shannon.Index, method = "pearson")
+scatter_plot(dat.nisk.2, Shannon.Index, Lat) +
+  labs(x = "Shannon Index", y = "Latitude") + 
+  ggtitle("Shannon Index vs. Latitude for 2 L Samples")
+cor.test(dat.nisk.2$Long, dat.nisk.2$Shannon.Index, method = "pearson")
+scatter_plot(dat.nisk.2, Long, Shannon.Index) +
+  labs(x = "Longitude", y = "Shannon Index") + 
+  ggtitle("Shannon Index vs. Longitude for 2 L Samples")
+# multivariable regression models for variables
+fit <- glm(Number.Species ~ Lat + Long + Relative.Depth, data = dat.nisk.2)
+summary(fit)
+fit.2 <- glm(Shannon.Index ~ Lat + Long + Relative.Depth, data = dat.nisk.2)
+summary(fit.2)
+
+```
+Interestingly, we find there is no correlation of latitude with both Species Richness and Shannon Index. Longitude is also not correlated to Shannon Index. But longitude does seem to be significantly correlated to species richness, with p = 0.021 for the Pearson test. Based on our multivariable regression model, relative depth (p = 0.00171) and longitude (p = 0.0055) both significantly influence species richness! 
+
+Let's make some plots. First, let's visualize species richness on a map with lat/lon. We can do this by calculating total species richness for each station/cast, which requires some extra data wrangling.
+
+```{r making figure for lat/long with total species richness per 2 L station}
+# filter edna data to volume of 2
+edna.2 <- edna.data %>% filter(Filtration.Volume == 2)
+# filter so it only contains station and organism data
+edna.2 <- edna.2 %>% dplyr::select(-c(2, 3, 4, 5, 6, 7))
+# group by station and sum other columns
+edna.2 <- edna.2 %>%                                
+  group_by(Station) %>% 
+  summarise_each(funs(sum))
+# mutate so that any value > 0 is a 1 and then sum rows to get number of species per station
+edna.2 <- edna.2 %>% mutate_at(-c(1), ~1 * (. != 0)) %>% 
+  mutate(Stat.Species.Total = rowSums(dplyr::select(., -c(1))))
+# filter out so it's just station with number of taxa
+edna.2 <- edna.2 %>% dplyr::select(Station, Stat.Species.Total)
+# merge with latitude and longitude data
+stat.taxa <- merge(edna.2, dat.nisk.2, by = "Station") %>%
+  dplyr::select("Station", "Stat.Species.Total", "Lat", "Long")
+# making map figure
+library(viridis)
+map <- ggplot(namerica) +
+  geom_sf(fill = "darkgray") +
+  geom_contour(data=bf, aes(x=x, y=y, z=z), breaks=c(-100), size=c(0.3), colour="grey") + # add 100m contour
+  geom_contour(data=bf, aes(x=x, y=y, z=z), breaks=c(-250), size=c(0.6), colour="grey") + # add 250m contour
+  #geom_sf(data=dat.nisk.2.sf, size = 2, shape = 19, fill ="red") +
+  coord_sf( xlim = c(-76, -65), ylim = c(35, 43) ) +
+  labs(x="Longitude", y="Latitude") +
+  annotate(geom = "text", x = -70, y = 37, label = "Atlantic Ocean", color = "grey22", size = 4.5)
+
+map + geom_point(data = stat.taxa, size = 4, aes(x = Long, y = Lat, color = Stat.Species.Total)) +
+  scale_color_viridis(option = "C", trans = "reverse") +
+  labs(x = "Longitude", y = "Latitude", color = "Total Species Richness") + 
+  ggtitle("Total Species Richness per 2 L Sampling Location")
+
+```
+
+Let's also make separate plots that show species richness for each relative depth type with lat/lon.
+
+```{r facet plots}
+base <- map + geom_point(data = dat.nisk.2, size = 4, aes(x = Long, y = Lat, color = Number.Species)) +
+  scale_color_viridis(option = "C", trans = "reverse") +
+  labs(x = "Longitude", y = "Latitude", color = "Total Species Richness") + 
+  ggtitle("Total Species Richness per 2 L Sampling Location")
+base + facet_wrap(~Depth.Bins, ncol=2, as.table = TRUE)
+```
+
+Now, let's visualize how species richness changes with longitude and relative depth.
+
+```{r plotting species richness with longitude and depth}
+# plotting longitude and relative depth with species richness 
+ggplot(data = dat.nisk.2, aes(x = Long, y = Relative.Depth, color = Number.Species)) + 
+  geom_point(size = 5) +
+  scale_color_viridis(option = "C", trans = "reverse") +
+  scale_y_reverse() +
+  labs(x = "Longitude", y = "Relative Depth (%)", color = "Species Richness") +
+  ggtitle("Species Richness vs. Longitude and Relative Depth for 2 L Samples")
+
+```
+The plots we made visualize how species richness generally increases with depth, specifically closer to the bottom. But is this because the bottom actually has higher SR and evenness, or is there eDNA rain/water mixing? We can plot the distributions of some species in the water column to begin seeking answers to this question. 
+
+```{r looking at species vs depth}
+# make new data set that includes 1, 2, and 3 L samples
+dat.nisk <- data %>% 
+   filter (Gear == "Niskin") %>%  #Casts 20+ only sampled 2 liters
+   dplyr::select (Station, Cast, Lat, Long, Sampling.Depth.Type, Sampling.Depth.Meter, Depth, Filtration.Volume, X.12S.final, Filt.Time) 
+ dat.nisk$Filt.Time <- as.POSIXlt(dat.nisk$Filt.Time, format = '%H:%M') 
+str(dat.nisk)
+table(dat.nisk$Sampling.Depth.Type, dat.nisk$Sampling.Depth.Meter)
+dat.nisk$Filt.Mins <- dat.nisk$Filt.Time$hour*60 + dat.nisk$Filt.Time$min 
+head(dat.nisk$Filt.Mins) # some samples have no time measured
+names(dat.nisk)[names(dat.nisk) == "Depth"] <- "Total.Depth"
+# read in species data
+edna.data <- read_excel("D:/GU201905/EcoMon2019FishPrimer.xlsx", sheet = "Species.Station.Data")
+edna.data <- edna.data[!grepl("MiSeq", edna.data$NGS.Platform),]
+edna.data <- edna.data[grep("Niskin", edna.data$Gear),]
+# merge species data with other data
+species.data <- merge(dat.nisk, edna.data, by = c("Station","Filtration.Volume", "Sampling.Depth.Type", "Sampling.Depth.Meter"))
+# rid of filt time because its giving an error
+species.data <- species.data %>% dplyr::select(-Filt.Time)
+# melt data frame so each species/depth/location has its own row
+species.data <- melt(species.data, measure.vars = c(14:151), variable.name = "Species", value.name = "Species.Read.Count")
+# read in base taxonomy info
+taxa.info <- read_excel("C:/Users/emily.speciale/Desktop/taxa_info.xlsx")
+taxa.info <- taxa.info %>% dplyr::select(Taxonomy.Latin.x, Taxonomy.Common.x, Swimbladder, Habitat)
+names(taxa.info)[names(taxa.info) == "Taxonomy.Latin.x"] <- "Species"
+names(taxa.info)[names(taxa.info) == "Taxonomy.Common.x"] <- "Common.Name"
+# merge data sets
+species.data <- merge(species.data, taxa.info, by = "Species", all.x = TRUE)
+# calculate relative depth and make depth bins
+species.data$Relative.Depth <- (species.data$Sampling.Depth.Meter / species.data$Total.Depth) * 100
+species.data <- species.data %>% mutate(Depth.Bins = case_when(
+  Relative.Depth <= 25  ~ "Shallow",
+  Relative.Depth > 25 & Relative.Depth <= 50  ~ "Mid",
+  Relative.Depth > 50 & Relative.Depth <= 75 ~ "Deep",
+  Relative.Depth > 75 ~ "Bottom")
+)
+# filter out any rows where species read count is 0
+species.data <- species.data %>% filter(Species.Read.Count > 0)
+# make plots for whichever species you choose
+# bathypelagic species plot
+bathypelagic <- species.data %>% dplyr::filter(Species %in% c("Gadus morhua", "Clupea harengus", "Peprilus triacanthus/burti"))
+species_plot(bathypelagic, Common.Name, Relative.Depth) + ggtitle("Bathypelagic Species Distribution")
+# demersal species plot
+demersal <- species.data %>% dplyr::filter(Species %in% c("Paralichthys dentatus", "Prionotus carolinus", "Stenotomus chrysops", "Urophycis tenuis"))
+species_plot(demersal, Common.Name, Relative.Depth) + ggtitle("Demersal Species Distribution")
+# pelagic neritic species plot
+pel.ner <- species.data  %>% dplyr::filter(Species %in% c("scomber scombrus", "Brevoortia tyrannus", "Anchoa mitchilli", 	
+"Alosa sapidissima"))
+species_plot(pel.ner, Common.Name, Relative.Depth) + ggtitle("Pelagic-neritic Species Distribution")
+# other species plot
+other <- species.data %>% dplyr::filter(Species %in% c("Ceratoscopelus maderensis", "Centropristis striata"))
+species_plot(other, Common.Name, Relative.Depth) + ggtitle("Other Species Distribution")
+# plots made for presentation
+# bottom dwellers
+btm.dwellers <- species.data %>% dplyr::filter(Species %in% c("Paralichthys dentatus", "Prionotus carolinus", "Centropristis striata"))
+btm.dwellers[btm.dwellers == "Summer flounder?"] <- "Summer flounder"
+species_plot(btm.dwellers, Common.Name, Relative.Depth) + labs(x = " ", y = "Relative Depth (%)") + ggtitle("Bottom or Reef Dwellers")
+# surface dwellers
+surf.dwellers <- species.data %>% dplyr::filter(Species %in% c("scomber scombrus", "Brevoortia tyrannus", "Anchoa mitchilli"))
+surf.dwellers[surf.dwellers == "Atlantic menhaden?"] <- "Atlantic menhaden"
+species_plot(surf.dwellers, Common.Name, Relative.Depth) + labs(x = " ", y = "Relative Depth (%)") + ggtitle("Pelagic Dwellers")
+
+```
+
+## Conclusions
+
+Overall, we found two prominent trends in our data. First, relative depth has a significant influence on species richness. With deeper waters, specifically near the bottom, comes more taxa. This does not necessarily mean there are more organisms on the bottom; simply that the species distribution is more diverse. This could be because there are many unique taxa near/on the seafloor compared to shallower depths, where just one species may dominate. The bottom is full of geographic features like coral reefs that could host an array of organisms, and there are also many special species adapted to live on the seafloor without sunlight. However, another explanation for the high taxa numbers could be due to the rain of eDNA falling to the seafloor, thus increasing its species richness. When we tested read count against depth type (not shown in this analysis), there was no significant differences, which could indicate no difference in eDNA amounts between depths. But read count is not necessarily a reliable variable to use. We also plotted the distribution of species found by eDNA within the water column for species known to be bottom and surface dwellers. While there was a general localization of eDNA signal that corresponded to each species' main habitat, there was lots of variation. Is this due to water mixing or eDNA rain? Or is it juvenile eDNA being picked up? There are lots of factors to consider, and further analysis must be done to make an accurate conclusion.
+
+We also found that species richness generally decreases from the west to the east, aka further from the shoreline. We see a lot of high SR values associated with the Gulf Stream, in which the warm-core eddies provide habitats of high production and diversity. We also see hig SR values near the coastlines of Boston, where in the fall, spawning occurs. Further from shore lies the plataeus of George's Bank, which are known for rough water conditions and low productivity/biodiversity.
+
+
+
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

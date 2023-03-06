@@ -1,0 +1,433 @@
+---
+title: 'Marine mammal distributions, as measured by eDNA, Fall 2019'
+subtitle: 'Preliminary review of taxa and their distributions'
+author: "Richard McBride and Yuan Liu"
+date: "1/30/2023"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Introduction
+
+This document is a preliminary summary of the marine mammals detected by environmental DNA (eDNA) during the first of three surveys operated by NOAA's Northeast Fisheries Science Center on the northeast US continental shelf. Seawater samples of eDNA were filtered  aboard the NOAA Research Vessel Gordon Gunter (Cruise 201905) operating during the fall of 2019 in marine waters along the middle Atlantic seaboard, Georges Bank and southern Gulf of Maine. 
+
+The purpose of this 'Version 2' document is a first full pass of the marine mammal data. Version 1 was shared with others in the NEFSC Protected Species Branch, and Yuan Liu and Rich McBride met with the following on December 15, 2022, to take a closer look: Doug Sigourney, Marjorie Lyssikatos, Fred Wenzel, Kimberly Murray.
+
+It is expected that there are also direct, visual observations of marine mammals made from this survey platform, but those data are not part of this preliminary analysis.
+
+## Methods
+
+**eDNA Field Sampling**. Seawater samples were taken at 19 CTD casts ('stations') during the period October 15 to November 1, 2019, and within a region between offshore waters of North Carolina and marine waters of the southern Gulf of Maine. eDNA was filtered onboard the ship and the filtrate was frozen immediately, and stayed frozen until DNA extraction in the laboratory.
+
+The samples examined here were collected by nisken bottlems assembled as a rosette. In addition, surface water samples were collected by bucket or the ship's flow-through system, as well as some negative controls as tabulated below. For this analysis, we select only niskin bottle samples.
+
+```{r loading and wrangling eDNA Sampling data}
+library (tidyverse); library(readxl); library (lubridate);
+
+# read in unfiltered data set for GU201905 data
+getwd() # check working directory
+setwd('..') # move up one directory
+
+All.Types <- read_excel('Copy_DNA_extracts_Qubit.xlsx', sheet = 'R.Station.vs.DNA')
+table(All.Types$Gear, All.Types$Sampling.Depth.Type)
+
+# Reduce data set" filter and wrangle data for only Niskin bottle samples (samples at the surface occurred in flow through and by bucket)
+
+dat.niskin <- All.Types %>% 
+  dplyr::filter (Gear == "Niskin") %>% 
+  dplyr::select (Station, Cast, Lat, Long, Depth, Sampling.Depth.Type, Sampling.Depth.Meter, Filtration.Volume) 
+
+```
+
+Seawater was sampled and filtered from 3 different volumes for most (but not all) stations: 1, 2, and 3 L, paired per cast and per depth. That amounted to 50 1-L samples, 69 2-L samples, and 50 3-L samples, for a total of `r (50*1 + 69*2 + 50*3)` L sampled and filtered.
+
+```{r filtration volumes by cast/station}
+
+FancyTable <- function(x, y) {
+temp.table <- addmargins(table(x, y), margin = seq_along(dim(table(x, y))), FUN = sum, quiet = TRUE) 
+return(temp.table)
+}
+# Total number of Niskin water samples by rosette cast (columns, 1-24) and volume filtered (rows; 1, 2, or 3 L)
+FancyTable(dat.niskin$Filtration.Volume, dat.niskin$Cast)
+```
+
+**Field Sampling by depth** The stations were located across the continental shelf and in the Gulf of Maine within a total range from `r min(dat.niskin$Depth)` to `r max(dat.niskin$Depth)` meters deep. For each station, up to four depths types were sampled: surface waters, mid-depth (relative to bottom depth), the depth of the Chlorophyll maximum, and the bottom (or a max of 500 meters when deeper). The box-whisker figure below shows that most sampling occurred in < 100 m depths. 
+
+``` {r box-wisker plots of each depth type}
+Talk_Theme = theme(
+  axis.title.x = element_text(size = 16),
+  axis.text.x = element_text(size = 14),
+  axis.title.y = element_text(size = 16),
+  axis.text.y = element_text(size = 14))
+
+ggplot(dat.niskin, aes(x=Sampling.Depth.Type, y=Sampling.Depth.Meter)) + 
+   geom_boxplot() +
+   scale_y_reverse() +
+   annotate(geom = "text", x = "Mid", y = 400, label = 'eDNA Sampling', color = "black", size = 5, fontface = 'bold') +
+   annotate(geom = "text", x = "Mid", y = 450, label = 'occurred at up to 4 depth types per station', color = "black", size = 3, fontface = 'bold') +
+  Talk_Theme  
+
+```
+
+At three depth types (Sfc, Mid, Btm), sampling 1, 2 and 3 liters occurred at 14 stations, and the remaining 5 stations sampled only 2 liter samples, for a total of 47 samples at each of these three depth types. A chlorophyl maximum layer was not observed at all stations, and was only sampled at 12 instead of 19 stations, with 1, 2, and 3 liters occurring at 8 stations and 2-liter only at the other four stations. 
+
+``` {r filtration volumes by cast/station and by depth type}
+
+dat.nisk.sfc <- dat.niskin %>% dplyr::filter (Sampling.Depth.Type == 'Sfc') 
+dat.nisk.mid <- dat.niskin %>% dplyr::filter (Sampling.Depth.Type == 'Mid') 
+dat.nisk.chlmax <- dat.niskin %>% dplyr::filter (Sampling.Depth.Type == 'Chl.max') 
+dat.nisk.btm <- dat.niskin %>% dplyr::filter (Sampling.Depth.Type == 'Btm') 
+
+# Surface samples only
+(FancyTable(dat.nisk.sfc$Filtration.Volume,    dat.nisk.sfc$Cast))
+# Mid depth samples only
+(FancyTable(dat.nisk.mid$Filtration.Volume,    dat.nisk.mid$Cast))
+# Chlorophyll maximum layer only
+(FancyTable(dat.nisk.chlmax$Filtration.Volume, dat.nisk.chlmax$Cast))
+# Bottom depths only
+(FancyTable(dat.nisk.btm$Filtration.Volume,    dat.nisk.btm$Cast))
+
+```
+
+Separate analysis of the same data set shows that the more water sampled, the more species detected, so analyses report out detections by both sampling depth type as well as filtration volume (see below). 
+
+**Geographic distribution of eDNA Stations** The stations were bound within a box from `r min(dat.niskin$Lat)` to `r max(dat.niskin$Lat)` ^o^N, and from `r max(dat.niskin$Long)*-1` to `r min(dat.niskin$Long)*-1`^o^W.
+
+```{r map, message=FALSE}
+library(ggspatial)
+library(mapdata); library(marmap)
+library(raster); library(rgdal); library(rgeos)
+library(rnaturalearth); library(rnaturalearthdata) 
+library(sf)
+
+namerica <- ne_countries(scale = 'medium', type = 'countries', continent = 'north america', returnclass = "sf")
+
+dat.niskin.sf <- st_as_sf(dat.niskin, coords = c('Long','Lat'), crs = 4326) 
+
+b <- getNOAA.bathy (lon1 = -77, lon2 = -64, lat1 = 35, lat2 = 43, res=1) # Turns out 1 is the finest resolution
+bathyLat = as.numeric(colnames(b)); bathyLon = as.numeric(rownames(b))
+bathyZ = as.numeric(b); dim(bathyZ) = dim(b)
+bf = fortify.bathy(b) # explicedly spatial?
+
+base.map <- ggplot(namerica) +
+ geom_sf(fill = "darkgreen") +
+  geom_contour(data=bf, aes(x=x, y=y, z=z), breaks=c(-100), size=c(0.3)) + # add 100m contour
+   geom_contour(data=bf, aes(x=x, y=y, z=z), breaks=c(-250), size=c(0.6)) + # add 250m contour
+labs(x="Longitude", y="Latitude") +
+ theme(axis.text.x = element_text(angle=45)) + 
+   annotate(geom = "text", x = -70, y = 37, label = "Atlantic Ocean", color = "grey22", size = 2, fontface = 'bold') 
+
+base.map + 
+ geom_sf(data=dat.niskin.sf, pch = 'X', size = 2, color = 'red') +
+   coord_sf( xlim = c(-75.5, -65.6), ylim = c(35.5, 42.5) ) +
+    facet_grid (Filtration.Volume~Sampling.Depth.Type) +
+     ggtitle("Sampling 'X' by depth type and filtration volume (1-3 L)")+ 
+    theme(plot.title = element_text(size = 12, face = "bold")) 
+
+ggsave("AlleDNA.casts.bytypevolume.png")
+
+```
+
+This grid of maps depicts the sampling coverage by depth type and filtration volume. The most casts were done at the bottom, mid, and surface with 2 L filtered volumes. A Chl.max layer was not always observed, and thereby not always sampled, and filtering 1 and 3 L volumes did not occurr at all the northernmost stations.
+
+**eDNA Laboratory Processing** Samples were kept frozen until DNA extraction and quantification occurred back in the lab. This study asks 'what species are in the sample' using a metabarcoding approach, using the Riaz 12S primer set (https://doi.org/10.1093/nar/gkr732). Sequences were processed at the Cold Spring Harbor Laboratory, and bioinformatics were processed at the NOAA-NEFSC Milford Laboratory. 
+
+## Results
+
+Several protected marine mammals were detected, including three species of baleen whales, at least six species of toothed whales, and two species of seals. 
+
+Here is a list of marine mammals matched to the ASVs from the bioinformatics analyses. 
+
+In this first pass of the data, we aim to evaluate the initial assignments of Amplicon Sequence Variants (ASVs) to marine mammal species. Matches were first considered based on the percent match, as well as by plotting the geographic distributions of detections to evaluate how this fit with biogeography of the region.
+
+
+``` {r tabulate flatfishes}
+
+setwd ('C://Users/Richard.Mcbride/Documents/Genomics/Fall2019_projects/MarineMammals')
+MMspp.list <- read_excel('MarineMammalSpecies.xlsx', sheet = 'Sheet1')
+
+knitr::kable(MMspp.list, caption = "Marine mammal taxonomy assignments related to ASV and percent match.")
+
+```
+
+Identifications with 3 or fewer base pairs of mismatches were considered, which generally resulted in $\geq$ 99% match except one of the ASVs for *Lageonorhynchus obliquidens* (i.e., 97.83%). Commonly more than one ASV matched a potential taxanomic assignment so we consider this a naive list, requiring evaluation with marine mammal experts. 
+Questions to review are:
+
+* Are these species expected in the sampling region?
+   A recent paper on this is Chavez-Rosales et al. 2022. https://doi.org/10.3389/fmars.2022.877580
+   
+ + If so, are they rare, uncommon, common, or abundant?
+ 
+* What is the best reference(s) for common and scientific names?
+ + phylogeny?
+ + taxonomy?
+ 
+To do so, we merge the bioinformatic assignments with the field sampling data. This includes sequence read counts, although for the moment we will treat that data as simply presence/absence.
+
+``` {r merge in bioinformatics}
+getwd() # check working directory
+setwd('..') # move up one directory
+
+All.ASVs <- read_excel('Copy_EcoMon2019FishPrimer.xlsx', sheet = 'Station.Count')
+names(All.ASVs) <- gsub(x = names(All.ASVs), pattern = "\\&", replacement = ".") # The ampersan $ is not valid, change to period .
+
+niskin.ASVs <- merge(dat.niskin, All.ASVs, by = c("Station","Filtration.Volume", "Sampling.Depth.Type", "Sampling.Depth.Meter")) 
+```
+
+Next we create a function to spatially map the presence of this final assignments by ASV, plotting separately the sampling depth type and filtration volume.
+
+```{r create map function}
+setwd ('C://Users/Richard.Mcbride/Documents/Genomics/Fall2019_projects/MarineMammals')
+
+MarMammMaps <- function(Seq, XtitleX) {
+  pos.sf <- niskin.ASVs %>%  
+    dplyr::filter ({{Seq}} > 0) %>% 
+      st_as_sf(coords = c('Long','Lat'), crs = 4326)
+
+base.map + 
+ geom_sf(data = pos.sf, pch = 'X', size = 2, color = 'red') +
+   coord_sf( xlim = c(-75.5, -65.6), ylim = c(35.5, 42.5) ) +
+    facet_grid (Filtration.Volume~Sampling.Depth.Type) +
+     ggtitle(XtitleX) 
+}   
+```
+
+**Cetacea, Balaenopteridae**. We first apply this to three baleen whales. These are all distributed circumglobally and have a variety of protections in US waters and elsewhere. Assignment of these ASVs to a specific species was not ambiguous in these three cases.
+
+Yuan made a note in our December, 2022, meeting that the common minke whale is usually spotted on Georges Bank, as we see here.
+
+```{r apply map function to Baleen whales}
+# whale types
+
+MarMammMaps (Seq_181, "Balaenoptera acutorostrata, Seq_181") #Common minke whale
+  ggsave("BacuSeq_181.png")
+
+MarMammMaps (Seq_1115, "Balaenoptera physalus, Seq_1115") #Fin whale	 
+  ggsave("BphySeq_1115.png")
+
+MarMammMaps (Seq_323, "Megaptera novaeangliae, Seq_323") #Humpback whale		
+  ggsave("MnovSeq_323.png")
+
+```
+
+**Cetacea, Dephinidae.** We turn our attention next to toothed whales with circumglobal distributions. There was a lot of potential ambiguity in assigning taxa for this group.
+
+Three sequences, Seq_242.783.1136, matched 99.28% with *Globicephala macrorhynchus* (short-finned pilot whale), *Peponocephala electra* (Melon-headed whale), *Feresa attenuata* (Pygmy killer whale), and *Globicephala melas* (Long-finned pilot whale). 
+
+Similarly, Seq_539 matched 99.28% with *Globicephala macrorhynchus* (short-finned pilot whale), *Peponocephala electra* (Melon-headed whale), *Feresa attenuata* (Pygmy killer whale), and *Globicephala melas* (Long-finned pilot whale). 
+
+And Seq_81 matched 100% with *Globicephala macrorhynchus* (short-finned pilot whale), but also *Peponocephala electra* (Melon-headed whale), *Feresa attenuata* (Pygmy killer whale), and *Globicephala melas* (Long-finned pilot whale). 
+
+Can any of these be ruled out by biogeography or more microhabitat characteristics?
+
+In terms of Globicephala, Short-finned pilot whales are more likely south of Georges Bank, while long-finned are more likely north of Georges Bank (Rone and Pace 2012).
+
+In terms of Feresa, pygmy killer whales are rare in our surveys. While in the Atlantic, they are more tropical (check that).
+
+``` {r apply map function to toothed whales}
+  
+MarMammMaps (Seq_242.783.1136, "Globicephala macrorhynchus, Seq_242.783.1136") #No perfect match. Some kind of whale.
+  ggsave("GmacSeq_242.783.1136.png")
+  
+MarMammMaps (Seq_539, "Globicephala macrorhynchus, Seq_539") #Short-finned pilot whale??	
+  ggsave("GmacSeq_539.png")
+
+MarMammMaps (Seq_81, "Globicephala macrorhynchus, Seq_81") #Some kind of whale	   
+  ggsave("GmacSeq_81.png")
+```
+
+For example, this X marked for Seq_539 is in a mixing zone for these two pilot whale species, so it could be either species.
+
+Whereas for Seq_81, both species are likely represented but it is not possible to distinguish them from each other.
+
+
+In this next example, Seq_38, there were 100% matches with *Delphinus delphis* (Common dolphin), *Lagenodelphis hosei* (Fraser's dolphin), *Stenella attenuata* (Pantropical spotted dolphin), and *Delphinus capensis* (Long-beaked common dolphin).
+
+Similarly, Seq_114.639.991 matched 99.28% with *Delphinus delphis* (Common dolphin), *Lagenodelphis hosei* (Fraser's dolphin), *Stenella attenuata* (Pantropical spotted dolphin), and *Delphinus capensis* (Long-beaked common dolphin).
+
+And Seq_1107 matched 99.26% with *Delphinus delphis* (Common dolphin), *Lagenodelphis hosei* (Fraser's dolphin), *Stenella attenuata* (Pantropical spotted dolphin), and *Delphinus capensis* (Long-beaked common dolphin).
+
+In our region, D. delphis is the most common, and most likely (Jefferson et al. 2009). These three ASVs can probably be combined. Frasers and spotted dolphins are to the south, and in particular, long-beaked is rare and to the south.
+
+```{r apply to more toothed whales}
+MarMammMaps (Seq_38, "Delphinus delphis, Seq_38") #Some kind of dolphin		 
+  ggsave("DdelSeq_38.png")
+
+MarMammMaps (Seq_114.639.991, "Delphinus delphis, Seq_114.639.991") #Some kind of dolphin	
+  ggsave("DdelSeq_114.639.991.png")
+
+MarMammMaps (Seq_1107, "Delphinus delphis, Seq_1107") #Some kind of dolphin	
+  ggsave("DdelSeq_1107.png")
+
+```
+
+Also in the Dephinidae, *Tursiops* was detected. There are multiple populations/stocks of *T. truncatus* (Mead, et al. 1995; see other links, below). M. Lyssikatos provided an outline of as many as 5 stocks of T. truncatus, and while we don't appear to detect that from the ASVs here, her notes are attached at the end.
+
+The species *Tursiops aduncus* does not appear to be distributed in the Atlantic and can be ruled out. It appears that some bu tno all of the Stennella can be ruled out of occurring in our region.
+
+In the first example of *Tursiops*, Seq_132.626 matched to *Tursiops truncatus* (Common bottlenose dolphin) with no ambiguity.
+
+However, Seq 28 matched 100% with *Tursiops aduncus* (Indo-Pacific bottlenose dolphin), *Tursiops truncatus* (Common bottlenose dolphin), *Stenella longirostris* (Spinner dolphin), *Stenella attenuata* (Pantropical spotted dolphin), and *Stenella coeruleoalba* (stripped dolphin), *Stenella frontalis* (Atlantic spotted dolphin), and *Stenella clymene* (Clymene dolphin). Likely *T. truncatus* but cannot rule out *Stenella* spp.
+
+Similarly, Seq_673 matched 100% with *Tursiops* aduncus (Indo-Pacific bottlenose dolphin), Tursiops truncatus (Common bottlenose dolphin), Stenella longirostris (Spinner dolphin), Stenella attenuata (Pantropical spotted dolphin), Stenella frontalis (Atlantic spotted dolphin), Stenella clymene (Clymene dolphin), and Stenella coeruleoalba (striped dolphin). Again, likely *T. truncatus* but cannot rule out *Stenella* spp.
+
+And Seq_798.825 matched 99.28% with Tursiops aduncus (Indo-Pacific bottlenose dolphin), Tursiops truncatus (Common bottlenose dolphin), Stenella longirostris (Spinner dolphin), Stenella attenuata (Pantropical spotted dolphin), Stenella frontalis (Atlantic spotted dolphin), Stenella clymene (Clymene dolphin), and Stenella coeruleoalba (stripped dolphin). Again, likely *T. truncatus* but cannot rule out *Stenella* spp.
+
+```{r map Tursiops spp.}
+MarMammMaps (Seq_132.626, "Tursiops truncatus, Seq_132.626") #Common bottlenose dolphin
+  ggsave("TtruSeq_132.626.png")
+
+ MarMammMaps (Seq_28, "Tursiops aduncus, Seq_28") #Some kind of dolphin		
+  ggsave("TaduSeq_28.png")
+  
+MarMammMaps (Seq_673, "Tursiops aduncus, Seq_673") #Some kind of dolphin			
+  ggsave("TaduSeq_673.png")
+
+MarMammMaps (Seq_798.825, "Tursiops aduncus, Seq_798.825") #Some kind of dolphin	
+  ggsave("TaduSeq_798.825.png")
+  
+```
+
+Also in the Dephinidae, the match for *Lageonorhynchus obliquidens* (Pacific white-sided dolphin) is distributed in the Pacific Ocean, but there is a congener in the Atlantic (Atlantic white-sided dophin, *Lagenorhynchus acutus*) that may not be distinguishable by sequence, but can be ruled out by biogeography.
+
+However, Seq 185 actually matched 97.83% with *Lagenorhynchus obliquidens* (Pacific white-sided dolphin), as well as *Sotalia guianensis* (Guiana dolphin), *Cephalorhynchus commersonii* (Commerson's dolphin), *Cephalorhynchus heavisidii* (Heaviside's dolphin), *Lagenorhynchus albirostris* (White beaked dolphin), and *Lagenorhynchus acutus* (Atlantic white-sided dolphin).
+
+It is most likely Atlantic white-sided dolphin, but there is a possibility it is Commerson (meeting notes are not clear so need a follow up). Also, possibly white beaked dolphin but this is a bit confusing and may need more review. For example, WBD used to be here, 20 years ago, but found further north. And there is high multi-annual variation in abundance between white-sided and white-beaked dolphins in the Gulf of Maine (Low years of WSD bycatch tended to coincide with low abundance years of WSD but more sightings of white-beaked. The flip-flop likely driven by environmental factors.; see D. Palka if needed). Doug S said that a quick look at input data for our modelling showed only have 3 sightings of white-beaked dolphins, suggesting that this is not likely. Debra P. might have more to say is we look again at specific locations.
+
+The same for Seq 155, which matched 100% with *Lagenorhynchus obliquidens* (Pacific white-sided dolphin), *Sotalia guianensis* (Guiana dolphin), *Cephalorhynchus commersonii* (Commerson's dolphin), *Cephalorhynchus heavisidii* (Heaviside's dolphin), *Lagenorhynchus albirostris* (White beaked dolphin), and *Lagenorhynchus acutus* (Atlantic white-sided dolphin). As above, for Seq. 185.
+
+Seq 339 was not run in the first version of this code, so we did not get expert opinion on it, but it matched to Pacific white-sided dolphin. 
+
+In terms of assignment for all three ASVs, we might go with a qualified *Lagenorhynchus acutus* (Atlantic white-sided dolphin) but check with D. Palka.
+
+```{r map L. Obliquidens}  
+MarMammMaps (Seq_155, "Lagenorhynchus obliquidens, Seq_155") #Some kind of dolphin	
+  ggsave("LoblSeq_155.png")
+
+MarMammMaps (	Seq_185, "Lagenorhynchus obliquidens, Seq_185") #Some kind of dolphin		
+  ggsave("LoblSeq_185.png")
+
+MarMammMaps (	Seq_339, "Lagenorhynchus obliquidens, Seq_339") #Pacific white-sided dolphin? But how?
+  ggsave("LoblSeq_185.png")
+
+``` 
+
+Among the dephinid toothed whales, assignment of Seq_331 was unambiguous to *Grampus griseus* (Risso’s dolphin).
+
+``` {r apply to a still another dephinid toothed whale}
+
+MarMammMaps (Seq_331, "Grampus griseus, Seq_331") #Risso’s dolphin	
+  ggsave("GgriSeq_331.png")
+
+```
+
+Seq_127 is an additional toothed whale in another family, Phocoenidae, which is distributed globally in inshore waters, including in Atlantic and Pacific waters of North America. Taxon assignment to *Phocoena phocoena* (Harbor porpoise)was not ambiguous.
+
+``` {r apply more maps to a phocoenid}
+
+MarMammMaps (Seq_127, "Phocoena phocoena,	Seq_127") #Harbor porpoise	
+  ggsave("PphoSeq_127.png")
+  
+```
+
+A couple of seals were identified (Carnivora, Phocidae). Both need more attention.
+
+*Phoca groenlandica* appears to be an incorrect genus, as the harp seal, which occurs in our region of the US northeast, is *Pagophilus groenlandicus*. This assignment was not notably ambiguous, but Kimberly Murray confirmed this is an outdated genus, and use *Pagophilus groenlandicus*.
+
+The other phocid needs more attention. Seq_1 along with 16 other ASVs matched 100% with *Phoca largha* (Spotted seal), *Halichoerus grypus* (Grey Seal), *Phoca vitulina* (Harbor seal), *Cystophora cristata* (Hooded seal), *Phoca fasciata* (Ribbon seal), *Pusa caspica* (Caspian seal), and *Phoca sibirica* (Baikal seal). *Phoca largha* is distributed in Alaska, but there is a harbor seal (*Phoca vitulina*) that is widely distributed around the globe, including on Atlantic and Pacific coasts of North America. Can we narrow this down based on biogeography?
+
+According to K. Murray: Harp and hooded seals are mainly an ice-associated species farther north, but venture down our way occasionally Jan-May. So a detection off Boston in late October seems unlikely. 
+
+More likely it is a harbor or gray seal. Harbor seals migrate south from Maine in the fall, and some portion of the population over winters in southern New England and the Mid-Atlantic. We have tagged them off Virginia in February and they are observed off the Outer Banks, NC, so a Maryland detection is not too crazy. Given time/area, I would say those could be either. Our limited tracking data suggests harbor seals hug inshore waters vs gray seals that go everywhere and offshore, so I wonder if those offshore points might have higher probability of being gray seal.
+
+Either way it is not *P. largha*.
+
+``` {r apply more maps to seals}
+# seal types
+  
+MarMammMaps (Seq_583, "Phoca groenlandica, Seq_583") #Harp seal	 
+  ggsave("PgroSeq_583.png")
+
+MarMammMaps (Seq_1.other16ASVs, "Phoca largha, Seq_1.other16ASVs") #Some kind of seal		 
+  ggsave("PlarSeq_1&other16ASVs.png")
+
+```
+
+## Conclusions
+
+Several taxa assignments were unambiguous, particularly for the baleen whales, but less so for toothed whales and seals. Some of this can be narrowed down by evaluating the biogeographic distributions of these candidate species, and possible by more microhabitat consideration of season or depth. 
+
+This is a first cut. We have more eDNA surveys/seasons to add/analyze. We have not yet matched these to the visual observations on APSS data, either throught the individual 'synoptic' surveys of the summaries of AMAAPS in general
+future direction.
+
+## Acknowledgements
+
+We thank Doug Sigourney, Marjorie Lyssikatos, Fred Wenzel, and Kimberly Murray, who helped review this document.
+
+## References 
+
+eDNA papers on marine mammals.
+
+Székely D., Cammen K. M., Olsen M. T. 2022. Needles in an ocean haystack: using environmental DNA to study marine mammals in the North Atlantic. NAMMCO Scientific Publications, 12. https://doi.org/10.7557/3.6482.
+
+Alter S. E., King C. D., Chou E., Chin S. C., Rekdahl M., Rosenbaum H. C. 2022. Using Environmental DNA to Detect Whales and Dolphins in the New York Bight. Frontiers in Conservation Science, 3. https://doi.org/10.3389/fcosc.2022.820377.
+
+
+The following were identified by others at the December, 2022, meeting:
+
+https://www.fisheries.noaa.gov/national/marine-mammal-protection/marine-mammal-stock-assessment-reports-species-stock
+
+https://apps-nefsc.fisheries.noaa.gov/AMAPPSviewer/
+
+Chavez-Rosales S., Josephson E., Palka D., Garrison L. 2022. Detection of Habitat Shifts of Cetacean Species: A Comparison Between 2010 and 2017 Habitat Suitability Conditions in the Northwest Atlantic Ocean. Frontiers in Marine Science, 9. https://doi.org/10.3389/fmars.2022.877580
+
+Rone, B.K. and R.M. Pace, III. 2012. A simple photograph-based approach for discriminating between free-ranging long-finned (Globicephala melas) and short-finned (G. macrorhynchus) pilot whales off the east coast of the United States. Mar. Mamm. Sci. 28(2):254–275.
+
+Related to Rone, see: https://media.fisheries.noaa.gov/2022-08/Short%20Fin%20Pilot%20Whale-West%20N%20Atl%20Stock_SAR%202021.pdf
+and
+https://media.fisheries.noaa.gov/2022-08/Long-Fin%20Pilot%20Whale-West%20N%20Atl%20Stock_SAR%202021.pdf
+
+Jefferson, T.A., D. Fertl, J. Bolanos-Jimenez and A.N. Zerbini. 2009. Distribution of common dolphins (Delphinus spp.) in the western North Atlantic: A critical re-examination. Mar. Biol. 156:1109–1124.
+and
+https://media.fisheries.noaa.gov/2022-08/Com%20Dolphin-West%20N%20Atl%20Stock_SAR%202021.pdf
+
+Mead, James G. and Potter, Charles W. 1995. "Recognizing Two Populations of the Bottlenose Dolphin (Tursiops truncatus) of the Atlantic Coast of North America - Morphologic and Ecologic Considerations." International Marine Biology Research Institute: IBI Reports. 31–44.
+https://media.fisheries.noaa.gov/dam-migration/111_f2016_commondolphin_-508_final.pdf
+and https://www.researchgate.net/publication/350401133_Common_dolphin_Delphinus_delphis
+
+
+
+Supplement:
+Details notes on the 5 populations of bottlenose dolphins, contributed by Marjorie Lyssikatos.
+
+There are 5 stocks in the Greater Atlantic Region
+
+Two coastal/estuarine stocks - "...demographically independent stocks distributed in coastal and estuarine waters of the wNA". Based on the limited habitat ranges of the estuarine stocks below - they can likely be ruled out from ecomon sample hits because water sample stations don't occur in estuarine and nearshore habitats where these stocks reside. 
+
+1) Northern North Carolina estuarine -
+https://media.fisheries.noaa.gov/2021-07/f2020_AtlGmexSARs_NNCESBottlenoseDolphin.pdf?null
+
+
+2) Southern North Carolina estuarine
+https://media.fisheries.noaa.gov/2021-07/f2020_AtlGmexSARs_SNCESBottlenoseDolphin.pdf?null
+
+That would leave the northern migratory, southern migratory and offshore bottlenose dolphin stocks.  Separation and degree of overlap between the coastal and offshore forms varies north vs south of Cape Hatteras: more details on longitudinal/latitudinal separation can be found in their respective stock assessment reports. 
+
+3) Northern migratory coastal stock
+https://media.fisheries.noaa.gov/2021-07/f2020_AtlGmexSARs_NmigBottlenoseDolphin.pdf?null
+
+4) Southern migratory coastal stock
+https://media.fisheries.noaa.gov/2021-07/f2020_AtlGmexSARs_SmigBottlenoseDolphin.pdf?null
+
+5) Offshore Bottlenose Dolphins
+https://media.fisheries.noaa.gov/dam-migration/2019_sars_atlantic_offshorebottlenose.pdf
+
+
+

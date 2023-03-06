@@ -1,0 +1,230 @@
+---
+title: "eDNA.Analysis.Part.1"
+author: "Emily Speciale"
+date: "7/7/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+The purpose of this markdown is to understand the relationship between eDNA and filtration volume. It is important to know what filtration volume is sufficient for sampling; 1, 2, or 3 L. There must be a balance between collecting diverse taxa while also not wasting time and resources. From the eDNA samples collected from the NOAA Research Vessel Gordon Gunter in the fall of 2019 (GU1905), we can extract several variables per sample: total read count, number of taxa, and the Shannon Index, all of which give us quantitative grounds to justify our final decision on filtration volume. We hypothesize an increase in all variables with filtration volume. We also are interested in seeing the effective size, or relative benefit, of increasing filtration volume.
+
+## Methods
+
+Field sampling was done from offshore of North Carolina to the southern Gulf of Maine. Niskin bottles from a rosette were used to collect samples of 1, 2, and 3 L, paired per cast and per depth. 
+
+```{r loading and wrangling data}
+# read in functions
+source("D:/Hollings-2022/acoustic-eDNA-main/Rcode/emily_functions.R")
+# read in unfiltered data set for GU201905 data
+library(readxl); library(forcats)
+data <- read_excel('D:/GU201905/Copy_DNA_extracts_Qubit.xlsx', sheet = 'R.Station.vs.DNA')
+# filter and wrangle data for only Niskin bottle samples and only Casts < 20
+dat.niskin <- data %>% 
+   filter (Gear == "Niskin", Cast < 20) %>%  #Casts 20+ only sampled 2 liters
+   dplyr::select (Station, Cast, Lat, Long, Sampling.Depth.Type, Sampling.Depth.Meter, Filtration.Volume, X.12S.final, Filt.Time) 
+ dat.niskin$Filt.Time <- as.POSIXlt(dat.niskin$Filt.Time, format = '%H:%M') 
+str(dat.niskin)
+table(dat.niskin$Sampling.Depth.Type, dat.niskin$Sampling.Depth.Meter)
+dat.niskin$Filt.Mins <- dat.niskin$Filt.Time$hour*60 + dat.niskin$Filt.Time$min 
+head(dat.niskin$Filt.Mins) # some samples have no time measured
+
+dat.niskin <- dat.niskin %>% 
+  transform(Sampling.Depth.Type=factor(Sampling.Depth.Type,levels=c("Sfc", "Chl.max", "Mid", "Btm"))) %>% 
+  transform(X.12S.final=factor(X.12S.final,levels=c("No", "EL", "L", "M", "H")))
+table(dat.niskin$Sampling.Depth.Type, dat.niskin$X.12S.final)
+
+```
+
+We can quickly make a map to show where the samples were taken.
+
+```{r map, message=FALSE}
+library(ggspatial)
+library(mapdata); library(marmap)
+library(raster); library(rgdal); library(rgeos)
+library(rnaturalearth); library(rnaturalearthdata) 
+library(sf)
+
+namerica <- ne_countries(scale = 'medium', type = 'countries', continent = 'north america', returnclass = "sf")
+
+dat.niskin.sf <- st_as_sf(dat.niskin, coords = c('Long','Lat'), crs = 4326) 
+ 
+b <- getNOAA.bathy (lon1 = -77, lon2 = -64, lat1 = 35, lat2 = 43, res=1) # Turns out 1 is the finest resolution
+bathyLat = as.numeric(colnames(b)); bathyLon = as.numeric(rownames(b))
+bathyZ = as.numeric(b); dim(bathyZ) = dim(b)
+bf = fortify.bathy(b) # explicedly spatial?
+
+ggplot(namerica) +
+  geom_sf(fill = "darkgray") +
+  geom_contour(data=bf, aes(x=x, y=y, z=z), breaks=c(-100), size=c(0.3), colour="grey") + # add 100m contour
+  geom_contour(data=bf, aes(x=x, y=y, z=z), breaks=c(-250), size=c(0.6), colour="grey") + # add 250m contour
+  geom_sf(data=dat.niskin.sf, size = 2, shape = 19, fill ="red") +
+  coord_sf( xlim = c(-76, -65), ylim = c(35, 43) ) +
+  labs(x="Longitude", y="Latitude") +
+  annotate(geom = "text", x = -73.75, y = 43, label = "14 Niskin cast stations", color="black", size=4) +
+  annotate(geom = "text", x = -70, y = 37, label = "Atlantic Ocean", color = "grey22", size = 4.5)
+
+ggplot(namerica) +
+  geom_sf(fill = "darkgreen") +
+  geom_contour(data=bf, aes(x=x, y=y, z=z), breaks=c(-100), size=c(0.3)) + # add 100m contour
+  geom_contour(data=bf, aes(x=x, y=y, z=z), breaks=c(-250), size=c(0.6)) + # add 250m contour
+  geom_sf(data=dat.niskin.sf, size = 2, shape = 19, fill ="red") +
+  coord_sf( xlim = c(-76, -65), ylim = c(35, 43) ) +
+  labs(x="Longitude", y="Latitude") +
+  annotate(geom = "text", x = -73.75, y = 43, label = "14 Niskin cast stations", color="black", size=4) +
+  annotate(geom = "text", x = -70, y = 37, label = "Atlantic Ocean", color = "grey22", size = 4.5) 
+```
+
+Quantitative eDNA data was transformed and wrangled in Excel so that total read count was calculated. This data set includes both the total read count per sample as well as individual read counts from each Sequence (Seq represents an individual organism). We can use this data to calculate number of taxa per sample. 
+
+```{r adding in read count and number of taxa as variables}
+# read in quantitative eDNA data
+edna.data <- read_excel("D:/GU201905/EcoMon2019FishPrimer.xlsx", sheet = "Station.Count")
+# filter any Niskin or MiSeq samples
+edna.data <- edna.data[!grepl("MiSeq", edna.data$NGS.Platform),]
+edna.data <- edna.data[grep("Niskin", edna.data$Gear),]
+# calculate number of taxa/species by turning any value in a Seq column into a 1 and taking the sum
+taxa.data <- edna.data %>% mutate_at(-c(1:7), ~1 * (. != 0))
+taxa.data <- taxa.data %>% mutate(Number.Species = rowSums(dplyr::select(., -c(1:7))))
+# filter data frame so it does not have all the Seq columns
+taxa.data <- taxa.data %>% dplyr::select(Station, Read.Count, Sampling.Depth.Meter, Sampling.Depth.Type, Filtration.Volume, Number.Species,)
+# merge with dat.niskin
+dat.niskin <- merge(dat.niskin, taxa.data, by = c("Station","Filtration.Volume", "Sampling.Depth.Type", "Sampling.Depth.Meter"))
+
+```
+
+Shannon Index is a measure of species diversity; a high Shannon Index indicates a large number of species with even dominance, whereas a low Shannon Index indicates less species and/or a more dominant species. We can also use the quantitative eDNA file to calculate the Index and add it to our overall dataset.
+
+```{r adding in Shannon Index as a variable}
+# make new data frame for calculating Shannon Index
+shan.data <- edna.data
+# use the vegan package to create a new column that calculates Shannon Index
+library(vegan)
+shan.data$Shannon.Index <- diversity(shan.data [-c(1:7)], index="shannon")
+# filter data frame so it does not have all the Seq columns
+shan.data <- shan.data %>% dplyr::select(Station, Read.Count, Sampling.Depth.Meter, Sampling.Depth.Type, Filtration.Volume, Shannon.Index,)
+# merge with dat.niskin
+dat.niskin <- merge(dat.niskin, shan.data, by = c("Station","Filtration.Volume", "Read.Count", "Sampling.Depth.Type", "Sampling.Depth.Meter"))
+# re-level sampling depth types and filtration volumes for future plotting purposes
+dat.niskin <- dat.niskin %>% dplyr::mutate(Sampling.Depth.Type = fct_relevel(Sampling.Depth.Type, "Btm", "Mid", "Chl.max", "Sfc"))
+
+```
+
+
+## Filtration Volume vs Variables 
+
+We can use the summary_table function to group variables by filtration volume and then calculate the count, mean, standard deviation, and 95% confidence intervals of each group. We can then use the box_plot function to visualize the distribution of data. 
+
+```{r summary tables and box plots for unpaired data}
+# summary tables
+summary_table(dat.niskin, Filtration.Volume, Read.Count)
+summary_table(dat.niskin, Filtration.Volume, Number.Species)
+summary_table(dat.niskin, Filtration.Volume, Shannon.Index)
+# make filtration volume into a factor in order to plot
+dat.niskin$Filtration.Volume <- as.factor(dat.niskin$Filtration.Volume)
+dat.niskin <- dat.niskin %>% dplyr::mutate(Filtration.Volume = fct_relevel(Filtration.Volume, "3", "2", "1"))
+# box plots
+box_plot(data=dat.niskin, x=Filtration.Volume, y=Read.Count) + 
+  labs(x="Filtration Volume (L)", y="Read Count") +
+  ggtitle("Read Count Distribution for Filtration Volumes")
+box_plot(data=dat.niskin, x=Filtration.Volume, y=Number.Species) + 
+  labs(x="Filtration Volume (L)", y="Species Richness") +
+  #ggtitle("Species Richness Distribution for Filtration Volumes")
+box_plot(data=dat.niskin, x=Filtration.Volume, y=Shannon.Index) + 
+  labs(x="Filtration Volume (L)", y="Shannon Index") +
+  ggtitle("Shannon Index Distribution for Filtration Volumes")
+
+```
+Based on our summary tables and plots, we can see there is variability between the means of our variables for filtration volumes of 1, 2, and 3 L. However, we must test if these differences are significant. First, we can look at the differences in our variables between paired data points at our filtration volumes. The function paired_dif puts the data in a format such that the differences between 2 and 1 L and 3 and 2 L can be computed. Then, we can plot the results and see how many differences are positive versus negative. 
+
+```{r paired difference analysis}
+# making wide data frames based on filtration volume, then calculating differences
+paired_read <- paired_dif(df = dat.niskin, variable = "Read.Count")
+paired_species <- paired_dif(df = dat.niskin, variable = "Number.Species")
+paired_shan <- paired_dif(df = dat.niskin, variable = "Shannon.Index")
+
+# use violin plots to show results
+# paired differences between 2 and 1 L
+violin_plot(paired_read, Sampling.Depth.Type, diff1.2) + 
+  labs(x="Sampling Depth Type", y="Difference in Read Count between 2 and 1 liters")
+violin_plot(paired_species, Sampling.Depth.Type, diff1.2) + 
+  labs(x="Sampling Depth Type", y="Difference in Number of Taxa between 2 and 1 liters")
+violin_plot(paired_shan, Sampling.Depth.Type, diff1.2) + 
+  labs(x="Sampling Depth Type", y="Difference in Shannon Index between 2 and 1 liters")
+
+# paired differences between 3 and 2 L
+violin_plot(paired_read, Sampling.Depth.Type, diff2.3) + 
+  labs(x="Sampling Depth Type", y="Difference in Read Count between 3 and 2 liters")
+violin_plot(paired_species, Sampling.Depth.Type, diff2.3) + 
+  labs(x="Sampling Depth Type", y="Difference in Number of Taxa between 3 and 2 liters")
+violin_plot(paired_shan, Sampling.Depth.Type, diff2.3) + 
+  labs(x="Sampling Depth Type", y="Difference in Shannon Index between 3 and 2 liters")
+
+```
+Although there appears to be an inclination towards a positive or zero difference among the violin plots, we need solid statistical tests to conclude the significance of our variables vs. filtration volume. Because our data is paired, and filtration volume can be seen as both a parametric and non-parametric value, we can run both the paired t-test and Wilcoxon test. A p-value of < 0.05 will prove significance. 
+
+```{r paired t-test and Wilcoxon test}
+# check normality of paired data using shaprio test, a normal distribution has p > 0.05
+shapiro.test(with(paired_read, diff1.2))
+shapiro.test(with(paired_read, diff2.3))
+shapiro.test(with(paired_species, diff1.2))
+shapiro.test(with(paired_species, diff2.3))
+shapiro.test(with(paired_shan, diff1.2))
+shapiro.test(with(paired_shan, diff2.3))
+# paired t-tests for filtration volumes and read count
+t.test(paired_read$`2`, paired_read$`1`, paired=TRUE)
+t.test(paired_read$`3`, paired_read$`2`, paired=TRUE)
+# paired t-tests for filtration volumes and number of taxa
+t.test(paired_species$`2`, paired_species$`1`, paired=TRUE)
+t.test(paired_species$`3`, paired_species$`2`, paired=TRUE)
+# paired t-tests for filtration volumes and shannon index
+t.test(paired_shan$`2`, paired_shan$`1`, paired=TRUE)
+t.test(paired_shan$`3`, paired_shan$`2`, paired=TRUE)
+# wilcoxon tests for filtration volumes and read count
+wilcox.test(paired_read$`2`, paired_read$`1`, paired=TRUE)
+wilcox.test(paired_read$`3`, paired_read$`2`, paired=TRUE)
+# wilcoxon tests for filtration volumes and number of taxa
+wilcox.test(paired_species$`2`, paired_species$`1`, paired=TRUE)
+wilcox.test(paired_species$`3`, paired_species$`2`, paired=TRUE)
+# wilcoxon tests for filtration volumes and shannon index
+wilcox.test(paired_shan$`2`, paired_shan$`1`, paired=TRUE)
+wilcox.test(paired_shan$`3`, paired_shan$`2`, paired=TRUE)
+
+```
+We only see significance for number of taxa with filtration volume, which is proven both by the paired t-test and Wilcoxon test. We do not see any significance for read count or Shannon Index. The difference in number of taxa between 1 and 2 L was more significant than between 2 and 3 L. 
+
+## Filtration Volume vs Time
+
+Before reaching a conclusion, we must consider the factors of time and resources. Higher sampling volumes requires more filtration time (and energy) which may not always be possible due to a lack of resources or researchers. 
+
+```{r time analysis}
+dat.filt.mins <- dat.niskin %>% 
+      filter (Filt.Mins > 0) #delete records where time was not recorded
+group_by (dat.filt.mins, Filtration.Volume) %>% 
+     summarise(#count = n(), 
+               mean = mean (Filt.Mins, na.rm = TRUE), median = median (Filt.Mins, na.rm = TRUE),
+                sd =sd (Filt.Mins, na.rm = TRUE), IQR = IQR(Filt.Mins, na.rm = TRUE))       
+
+  ggplot(dat.filt.mins, aes(x=as.factor(Filtration.Volume), y=Filt.Mins)) +
+  geom_boxplot() +
+  #geom_jitter(shape=16, width = 0.1, height = 0.1) +
+  labs(x="Volume filtered (L)", y="Filtration time (mins)")
+  
+box_plot(dat.filt.mins, Filtration.Volume, Filt.Mins) +
+  labs(x = "Filtration Volume (L)", y = "Filtration Time (Minutes)")
+  
+summary_table(dat.filt.mins, Filtration.Volume, Filt.Mins)
+paired_time <- paired_dif(df = dat.filt.mins, variable = "Filt.Mins")
+  
+```
+
+Our data show that both the mean and median filtration time increases with water volume, but the variability of time needed to filter also increased with additional liters. The median time to filter doubled from 1 liter (14 min) to 2 liters (30 min), and increased another 50% to filter 3 liters (46 min). Correlation tests show that there is an extremely significant difference between filtration times for different filtration volumes. 
+
+## Conclusions
+
+Although sampling at 3 L most likely gives our samples the highest amount of taxa, the amount of time for filtration is not feasible. However, sampling at 1 L significantly decreases the amount of taxa within samples. Thus, as a happy medium, we consider 2 L to be the ideal filtration volume to use for eDNA sampling. 
+

@@ -1,0 +1,611 @@
+---
+title: 'Flatfish distributions: bottom trawl versus eDNA, Fall 2019'
+author: "Richard McBride"
+date: "11/30/2022"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Introduction
+
+This document compares flatfish distributional data as sampled by two different methods: one traditional and the other innovative. The traditional method is the NEFSC Bottom Trawl Survey (BTS) collected from the NOAA Research Vessel Henry Bigelow (Cruise 201904). The innovative method is from environmental DNA (eDNA) filtered from water samples collected aboard the NOAA Research Vessel Gordon Gunter (Cruise 201905). Both surveys operated during the fall of 2019, in the same regions (along the middle Atlantic seaboard, Georges Bank and southern Gulf of Maine).
+
+This draft, in particular, is to prepare for the 17th Flatfish Biology Conference.
+
+The goal is to evaluate how well eDNA works to measure biodiversity in the marine environment, specifically how well it detects flatfishes in a well studied region, using bottom trawl data as the reference. The following Amplicon Sequence Variants were detected in our filtered water samples and matched to these flatfish species.
+
+``` {r tabulate flatfishes}
+
+ SppTab <- data.frame (
+  short.name =  c('Brob',               'Emic',                'Sqau',                 'Cart',                    'Pden',               'Pobl',                   'Gcyn',             'Spap', 'Hhip'),
+  binomen =     c('Bothus robinsi', 'Etropus microstomus', 'Scophthalmus aquosus', 'Citharichthys arctifrons', 'Paralichthys dentatus', 'Paralichthys oblongus', 'Glyptocephalus cynoglossus', 'Syacium papillosum', 'Hippoglossus hippoglossus'),
+  common.name = c('Twospot Flounder',   'Smallmouth Flounder', 'Windowpane',           'Gulf Stream Flounder', 'Summer Flounder',     'Fourspot Flounder',         'Witch Flounder', 'Dusky Flounder', 'Atlantic Halibut'),
+  ASV =         c('Seq_63.392.787.1185', 'Seq_68.795.664.1198', 'Seq_11.161.766.940.381', 'Seq_42.894',         'Seq_26.other7ASVs',   'Seq_116',                  'Seq_151.891', 'Seq_36', 'Seq_274'),
+  habitat =     c('inshore shelf',       'inshore shelf',       'Shelf wide',           'Shelf wide',            'Shelf wide',         'Shelf wide',               'Deep water', 'Deep water', 'Gulf of Maine'),
+  fishery =     c('no',                  'no',                  'yes',                  'no',                  'yes',                  'no',                     'yes',      'no', 'yes')
+)
+
+
+SppTab
+```
+
+These species ranged from shallow, inshore shelf waters to deeper, offshore waters between Cape Hatteras, North Carolina, and Cape Ann, Massachusetts. Four are managed as fisheries, typically by the New England Fishery Management Council, except for summer flounder, which is managed by the Mid-Atlantic Fishery Management Council. 
+
+Two or three other flatfishes were also detected but could not be assigned to species level with certainty with the primer used here. These were Winter Flounder (*Pseudopleuronectes americanus*), Yellowtail Flounder (*Myzopsetta ferruginea*), and American Plaice (*Hippoglossoides platessoides*). These species are not included in thes analyses here.
+
+## Methods
+
+**eDNA**. Seawater samples were taken at 19 stations during the period October 15 to November 1, 2019, and between regions offshore of North Carolina and in the southern Gulf of Maine. These samples were collected by nisken bottlems assembled as a rosette. eDNA was filtered onboard the ship and the filtrate was frozen immediately, and stayed frozen until DNA extraction in the laboratory.
+
+```{r loading and wrangling eDNA Sampling data}
+library (tidyverse); library(readxl); library (lubridate); library(forcats) # Load packages
+
+# read in unfiltered data set for GU201905 data
+getwd() # check working directory
+#setwd ('C://Users/Richard.Mcbride/Documents/Genomics/Fall2019_projects/FlatfishBiolConf2022')
+setwd('..') # move up one directory
+setwd('./Compare123L')
+
+data <- read_excel('Copy_DNA_extracts_Qubit.xlsx', sheet = 'R.Station.vs.DNA')
+
+# Reduce data set" filter and wrangle data for only Niskin bottle samples (samples at the surface occurred in flow through and by bucket)
+
+data$Filt.Mins <- hour(data$Filt.Time)*60 + minute(data$Filt.Time) 
+dat.niskin <- data %>% 
+   dplyr::filter (Sampling.Depth.Type != 'Negative') %>% 
+   dplyr::select (Station, Cast, Lat, Long, Depth, Sampling.Depth.Type, Sampling.Depth.Meter, Filtration.Volume, Filt.Mins) 
+ str(dat.niskin)
+ 
+ # Select and add ASV data for 6 flatfishes collected by trawl and identified by eDNA
+
+edna.data <- read_excel("EcoMon2019FishPrimer.xlsx", sheet = "Station.Count")
+names(edna.data) <- gsub(x = names(edna.data), pattern = "\\&", replacement = ".") # The ampersan $ is not valid, change to period .
+
+Spp.eDNA <- function(Sppx, Seqx) { 
+Sppx <- edna.data %>%  # Extract just the niskin samples with one ASV to merge later with dat.niskin
+   dplyr::filter (Gear == "Niskin") %>%  # Selected for samples by Niskin bottle
+   dplyr::select (Station, Filtration.Volume, Sampling.Depth.Meter, Sampling.Depth.Type, Seqx)
+}
+
+# Two inshore flatfish
+
+Brob <- Spp.eDNA (Brob, "Seq_63.392.787.1185") # Bothidae: Bothus robinsi, Twospot Flounder, Seq_63.392.787.1185
+Emic <- Spp.eDNA (Emic, "Seq_68.795.664.1198") # Cyclopsettidae: Etropus microstomus, Smallmouth Flounder, Seq_68.795.664.1198
+ 
+# Two shelf flatfish
+Cart <- Spp.eDNA (Cart, "Seq_42.894")             # Cyclopsettidae: Citharichthys arctifrons, Gulfstream Flounder, Seq_42.894
+Saqu <- Spp.eDNA (Saqu, "Seq_11.161.766.940.381") # Scophthalmidae: Scophthalmus aquosus, Windowpane, Seq_11.161.766.940.381
+
+# Two shelf paralichthids
+Pden <- Spp.eDNA (Pden, "Seq_26.other7ASVs") # Paralichthidae: Paralichthys dentatus, Summer Flounder,Seq_26.other7ASVs
+Pobl <- Spp.eDNA (Pobl, "Seq_116")           # Paralichthidae: Paralichthys oblongus, Fourspot Flounder, Seq_116
+
+# Two deepwater species
+Gcyn <- Spp.eDNA (Gcyn, "Seq_151.891") # Pleuronectidae: Witch Flounder, Glyptocephalus cynoglossus, Seq_151.891
+Spap <- Spp.eDNA (Spap, "Seq_36")      # Cyclopsettidae: Dusky Flounder, Syacium papillosum, Seq_36
+
+# A Gulf of Maine species
+Hhip <- Spp.eDNA (Hhip, "Seq_274")  # Pleuronectidae: Atlantic halibut, Hippoglossus hippoglossus, Seq_274
+
+```
+
+Up to four depths types were sampled per station: surface waters, mid-depth (relative to bottom depth), the depth of the Chlorophyll maximum, and the bottom (or a max of 500 meters when deeper). The box-whisker figure below shows that most sampling occurred in < 100 m depths. Most samples, and most liters, were collected at the surface, and fewest were at the Chlorophyll maximum layer.
+
+``` {r box-wisker plots of each depth type}
+Talk_Theme = theme(
+  axis.title.x = element_text(size = 16),
+  axis.text.x = element_text(size = 14),
+  axis.title.y = element_text(size = 16),
+  axis.text.y = element_text(size = 14))
+
+ggplot(dat.niskin, aes(x=Sampling.Depth.Type, y=Sampling.Depth.Meter)) + 
+   geom_boxplot() +
+   scale_y_reverse() +
+   annotate(geom = "text", x = "Mid", y = 400, label = 'eDNA Sampling', color = "black", size = 7, fontface = 'bold') +
+   annotate(geom = "text", x = "Mid", y = 450, label = 'occurred at up to 4 depth types per station', color = "black", size = 5, fontface = 'bold') +
+  Talk_Theme  
+
+```
+
+Seawater was sampled and filtered from 3 different volumes for most (but not all) stations: 1, 2, and 3 L, paired per cast and per depth. The total volume filtered for this evaluation was 370 liters (i.e., 50 1-liter samples, 85 2-liter samples, and 50 3-liter samples). Separate analysis of the same data set shows that the more water sampled, the more species detected, but this is ignored in the analyses herein.
+
+```{r filtration volumes by depth}
+# Total number of Niskin water samples by rosette cast (columns, 1-24) and volume filtered (rows; 1, 2, or 3 L)
+table(dat.niskin$Filtration.Volume, dat.niskin$Cast)
+
+
+dat.nisk.sfc <- dat.niskin %>% dplyr::filter (Sampling.Depth.Type == 'Sfc') 
+dat.nisk.mid <- dat.niskin %>% dplyr::filter (Sampling.Depth.Type == 'Mid') 
+dat.nisk.chlmax <- dat.niskin %>% dplyr::filter (Sampling.Depth.Type == 'Chl.max') 
+dat.nisk.btm <- dat.niskin %>% dplyr::filter (Sampling.Depth.Type == 'Btm') 
+
+# Surface samples only
+(table(dat.nisk.sfc$Filtration.Volume,    dat.nisk.sfc$Cast))
+# Mid depth samples only
+(table(dat.nisk.mid$Filtration.Volume,    dat.nisk.mid$Cast))
+# Chlorophyll maximum layer only
+(table(dat.nisk.chlmax$Filtration.Volume, dat.nisk.chlmax$Cast))
+# Bottom depths only
+(table(dat.nisk.btm$Filtration.Volume,    dat.nisk.btm$Cast))
+
+```
+
+At three depth types, sampling 1, 2 and 3 liters occurred at 14 stations, and the remaining 5 stations sampled only 2 liter samples. Replicate 2-L samples were taken at the surface layer, resulting in higher sampling volume at this depth type. Sampling was reduced at the Chlorophyl maximum layer, for only 12 instead of 19 stations, with 1, 2, and 3 liters occurring at 8 stations and 2-liter only at the other four stations. 
+
+Filtering seawater occurred onboard and the filtered eDNA was frozen immediately. Samples were kept frozen until DNA extraction and quantification occurred back in the lab. This study asks 'what species are in the sample' using a metabarcoding approach. Sequences were processed at the Cold Spring Harbor Laboratory. Assignments of amplicon sequence variants to flatfish taxa were reviewed by an expert in the field (Thomas Munroe, NOAA Fisheries Systematics Laboratory, Washington, D.C.)
+
+
+**Bottom Trawl.** The data were screened with SQL developer to select the species sampled on a single cruise, 201904, operated from the Henry Bigelow in the fall of 2019 (September -November). The full Resource Survey Report is available at https://repository.library.noaa.gov/view/noaa/22941. 
+
+The longitudinal range is similar between the two surveys: -75.88— -65.735, for the BTS (201904) compared to -75.472— -65.77 for the ECOMON DNA stations (201905). However, the latitudinal range is larger for the BTS (201904): 34.629— 44.356, than the ECOMON DNA stations (201905): 35.995— 42.503. Thus, BTS stations well north or south of the eDNA domain were deleted so that the species compositions between surveys would be comparable. Specifically, data for BTS survey were deleted if the stations were further than 0.5 degree latitude of the ECOMON (201905) DNA stations range (35.995— 42.503.).
+
+Tows that were not standard (i.e., 20-minute tows, untangled net, etc.) were also deleted. According to P. Politis, standard tows have TOGA values <= 1324. This resulted in a total of 301 stations for comparison to eDNA samples.
+
+```{r Loading and wrangling BTS data}
+setwd('..') # move up one directory
+setwd('./FBTS.HB.201904')
+
+datBTS <- read_csv("Allspp201904.csv",
+                 col_types = cols(
+                  BEGLAT = col_double(),
+                  BEGLON = col_double()
+                  )) %>% 
+  
+   mutate(Lati=trunc(BEGLAT/100) + ((BEGLAT-(trunc(BEGLAT/100)*100))/100)*1.66 ) %>%
+    mutate(Long=trunc(BEGLON/100)+ ((BEGLON-(trunc(BEGLON/100)*100))/100)*1.66) %>%
+     mutate(Long=Long*-1) 
+ 
+datBTS <- dplyr::filter (datBTS, Lati < 43.0)  # delete stations that go outside the range of eDNA sampling
+datBTS <- dplyr::filter (datBTS, Lati > 35.4)
+dplyr::filter (datBTS, TOGA < 1325)            # delete any tows considered none standard
+
+nrow(datBTS)
+str(datBTS)
+
+# filter BTS data for selected flatfishes and create new objects
+
+Emic.trawl <- datBTS %>%  
+  dplyr::filter (SCINAME == "ETROPUS SP")
+
+Cart.trawl <- datBTS %>%  
+  dplyr::filter (SCINAME == "CITHARICHTHYS ARCTIFRONS")
+
+Saqu.trawl <- datBTS %>%  
+  dplyr::filter (SCINAME == "SCOPHTHALMUS AQUOSUS")
+
+ 
+Pobl.trawl <- datBTS %>%  
+   dplyr::filter (SCINAME == "PARALICHTHYS OBLONGUS")
+
+Pden.trawl <- datBTS %>%  
+   dplyr::filter (SCINAME == "PARALICHTHYS DENTATUS")
+
+Gcyn.trawl <- datBTS %>%  
+    dplyr::filter (SCINAME == "GLYPTOCEPHALUS CYNOGLOSSUS")
+
+```
+
+Species identifications occurred at sea, to the lowest possible taxon.
+
+**Comparible geographic coverage.** The stations sampled by both the bottom trawl survey and the eDNA water sampling were plotted on one map to demonstrate that the geographic coverage was broad and comparible. A total of 301 20-min bottom trawls are being compared to a total of 370 liters of seawater filtered from 19 stations at four different depth. 
+
+```{r map, message=FALSE}
+library(ggspatial)
+library(mapdata); library(marmap)
+library(raster); library(rgdal); library(rgeos)
+library(rnaturalearth); library(rnaturalearthdata) 
+library(sf)
+
+namerica <- ne_countries(scale = 'medium', type = 'countries', continent = 'north america', returnclass = "sf")
+
+dat.niskin.sf <- st_as_sf(dat.niskin, coords = c('Long','Lat'), crs = 4326) 
+datBTS.sf <- st_as_sf(datBTS, coords = c('Long','Lati'), crs = 4326) # Select BTS stations
+
+b <- getNOAA.bathy (lon1 = -77, lon2 = -64, lat1 = 35, lat2 = 43, res=1) # Turns out 1 is the finest resolution
+bathyLat = as.numeric(colnames(b)); bathyLon = as.numeric(rownames(b))
+bathyZ = as.numeric(b); dim(bathyZ) = dim(b)
+bf = fortify.bathy(b) # explicedly spatial?
+
+base.map <- ggplot(namerica) +
+  geom_sf(fill = "darkgreen") +
+  geom_contour(data=bf, aes(x=x, y=y, z=z), breaks=c(-100), size=c(0.3)) + # add 100m contour
+  geom_contour(data=bf, aes(x=x, y=y, z=z), breaks=c(-250), size=c(0.6)) + # add 250m contour
+  labs(x="Longitude", y="Latitude") +
+    annotate(geom = "text", x = -70, y = 37, label = "Atlantic Ocean", color = "grey22", size = 5, fontface = 'bold') 
+
+base.map + 
+  geom_sf(data=dat.niskin.sf, pch = 'X', size = 5, color = 'red') +
+  geom_sf(fill = "darkgreen") +
+  geom_sf(data=datBTS.sf, x = 'Long', y = 'Lati', pch = 16, size = 1) +
+  coord_sf( xlim = c(-75.5, -65.6), ylim = c(35.5, 42.5) ) +
+
+  annotate(geom = "text", x = -74, y = 42.5, label = "All Stations", color="white", size=5, fontface = 'bold') +
+   annotate(geom = "text", x = -74, y = 42.1, label = "• BTS (201904)",  color = "white", size = 4.5, fontface = 'bold') +
+    annotate(geom = "text", x = -74, y = 41.7, label = "X eDNA (201905)", color = "white", size = 4.5, fontface = 'bold') 
+
+ggsave("BTSeDNAstations20190405ALL.png")
+
+```
+
+## Results
+
+The geographic distributions of six flatfishes sampled by both methods -- the bottom trawl and filtered eDNA water samples -- are overlapped on a single map for comparison. First to merge the ASV data with the field collection data matrix, and wrangle the data to show positive stations by depth type (i.e., surface, mid, Chlorophyll maximum, and bottom depth). Separate maps are produced for the eDNA samples collected from the 4 depth types, while the bottom trawl data is collected only at the bottom depth and does not change in the maps of each species. 
+
+We begin with a common inshore flatfish: Smallmouth Flounder, *Etropus microstomus*. Note, the trawl catches identified this fish only to *Etropus* sp.
+
+```{r mapping Smallmouth Flounder: Etropus microstomus, Seq_68.795.664.1198, message=FALSE}
+
+# Cart and Cart.trawl were selected in an early chunk
+# See all stations chunk for some subroutines like base.map
+
+Emic.niskin.all <- merge(dat.niskin, Emic, by = c("Station","Filtration.Volume", "Sampling.Depth.Type", "Sampling.Depth.Meter")) 
+Emic.niskin.pos <- Emic.niskin.all %>%  dplyr::filter (Seq_68.795.664.1198 > 0)
+
+Emic.niskin.sfc.sf     <- Emic.niskin.pos %>%  dplyr::filter (Sampling.Depth.Type == 'Sfc') %>% 
+                          st_as_sf(coords = c('Long','Lat'), crs = 4326)
+Emic.niskin.mid.sf     <- Emic.niskin.pos %>%  dplyr::filter (Sampling.Depth.Type == 'Mid') %>% 
+                          st_as_sf(coords = c('Long','Lat'), crs = 4326)
+Emic.niskin.chlmax.sf  <- Emic.niskin.pos %>%  dplyr::filter (Sampling.Depth.Type == 'Chl.max') %>% 
+                          st_as_sf(coords = c('Long','Lat'), crs = 4326)
+Emic.niskin.btm.sf     <- Emic.niskin.pos %>%  dplyr::filter (Sampling.Depth.Type == 'Btm') %>% 
+                          st_as_sf(coords = c('Long','Lat'), crs = 4326)
+
+Emic.trawl.sf <- st_as_sf(Emic.trawl, coords = c('Long','Lati'), crs = 4326) # Select BTS stations
+
+base.trawl <- base.map +
+  geom_sf(data=Emic.trawl.sf, x = 'Long', y = 'Lati', pch = 16, size = 1) +
+  annotate(geom = "text", x = -74, y = 42.5, label = "E. microstomus", color="white", size=5, fontface = 'italic') +
+   annotate(geom = "text", x = -74, y = 42.1, label = "• BTS", color = "white", size = 4.5, fontface = 'bold') 
+
+DeepMaps <- function(Spplayer, Dtype) { 
+  base.trawl + # Surface
+ geom_sf(data=Spplayer, pch = 'X', size = 5, color = 'red') +
+   coord_sf( xlim = c(-75.5, -65.6), ylim = c(35.5, 42.5) ) +
+  annotate(geom = "text", x = -74, y = 41.7, label = Dtype, color = "white", size = 4.5, fontface = 'bold')
+}   
+
+DeepMaps (Emic.niskin.sfc.sf, "X Sfc eDNA")
+  ggsave("BTSeDNAstations20190405_Emic.sfc.png")
+  
+DeepMaps (Emic.niskin.mid.sf, "X Mid eDNA")
+  ggsave("BTSeDNAstations20190405_Emic.mid.png")
+
+DeepMaps (Emic.niskin.chlmax.sf, "X Chl.max eDNA")
+ggsave("BTSeDNAstations20190405_Emic.chlmax.png")
+
+DeepMaps (Emic.niskin.btm.sf, "X Btm eDNA")
+  ggsave("BTSeDNAstations20190405_Emic.btm.png")
+
+```
+
+As expected trawl catches of Smallmouth Flounder's were more restricted inshore and at the souther end of the sampling range. This was evident in eDNA samples at all depth types except the Chl max layer.
+
+We repeat to compare the distributions, by method, for the Windowpane, Scopthalmus aquosus.
+
+```{r mapping Windowpane, Seq_11.161.766.940.381, message=FALSE}
+
+Saqu.niskin.all <- merge(dat.niskin, Saqu, by = c("Station","Filtration.Volume", "Sampling.Depth.Type", "Sampling.Depth.Meter")) 
+Saqu.niskin.pos <- Saqu.niskin.all %>%  dplyr::filter (Seq_11.161.766.940.381 > 0)
+
+Saqu.niskin.sfc.sf     <- Saqu.niskin.pos %>%  dplyr::filter (Sampling.Depth.Type == 'Sfc')  %>% 
+                          st_as_sf(coords = c('Long','Lat'), crs = 4326)
+Saqu.niskin.mid.sf     <- Saqu.niskin.pos %>%  dplyr::filter (Sampling.Depth.Type == 'Mid')  %>% 
+                          st_as_sf(coords = c('Long','Lat'), crs = 4326)
+Saqu.niskin.chlmax.sf <- Saqu.niskin.pos %>%  dplyr::filter (Sampling.Depth.Type == 'Chl.max')  %>% 
+                          st_as_sf(coords = c('Long','Lat'), crs = 4326)
+Saqu.niskin.btm.sf     <- Saqu.niskin.pos %>%  dplyr::filter (Sampling.Depth.Type == 'Btm')  %>% 
+                          st_as_sf(coords = c('Long','Lat'), crs = 4326)
+
+Saqu.trawl.sf <- st_as_sf(Saqu.trawl, coords = c('Long','Lati'), crs = 4326) # Select BTS stations
+
+base.trawl <- base.map +
+  geom_sf(data=Saqu.trawl.sf, x = 'Long', y = 'Lati', pch = 16, size = 1) +
+  annotate(geom = "text", x = -74, y = 42.5, label = "S. aquosus", color="white", size=5, fontface = 'italic') +
+   annotate(geom = "text", x = -74, y = 42.1, label = "• BTS", color = "white", size = 4.5, fontface = 'bold') 
+
+DeepMaps <- function(Spplayer, Dtype) { 
+  base.trawl + # Surface
+ geom_sf(data=Spplayer, pch = 'X', size = 5, color = 'red') +
+   coord_sf( xlim = c(-75.5, -65.6), ylim = c(35.5, 42.5) ) +
+  annotate(geom = "text", x = -74, y = 41.7, label = Dtype, color = "white", size = 4.5, fontface = 'bold')
+}   
+
+DeepMaps (Saqu.niskin.sfc.sf, "X Sfc eDNA")
+  ggsave("BTSeDNAstations20190405_Saqu.sfc.png")
+  
+DeepMaps (Saqu.niskin.mid.sf, "X Mid eDNA")
+  ggsave("BTSeDNAstations20190405_Saqu.mid.png")
+
+DeepMaps (Saqu.niskin.chlmax.sf, "X Chl.max eDNA")
+ggsave("BTSeDNAstations20190405_Saqu.chlmax.png")
+
+DeepMaps (Saqu.niskin.btm.sf, "X Btm eDNA")
+  ggsave("BTSeDNAstations20190405_Saqu.btm.png")
+
+
+```
+
+The Windowpane was distribut more broadly across the shelf than the Smallmouth Flounder. Again, however, eDNA sampling at the Chl max layer was not particularly revealing.
+
+Moving out onto the shelf, we examine Gulfstream Flounder, *Citharichthys arctifrons*. This species is expected to be widely distributed across the continental shelf along the mid-Atlantic seaboard but not in the Gulf of Maine.
+
+
+```{r mapping a small, common flounder: Citharichthys arctifrons, Seq_42.894, message=FALSE}
+
+# Cart and Cart.trawl were selected in an early chunk
+# See all stations chunk for some subroutines like base.map
+
+Cart.niskin.all <- merge(dat.niskin, Cart, by = c("Station","Filtration.Volume", "Sampling.Depth.Type", "Sampling.Depth.Meter"))
+Cart.niskin.pos <- Cart.niskin.all %>% dplyr::filter (Seq_42.894 > 0)
+
+Cart.niskin.sfc.sf     <- Cart.niskin.pos %>%  dplyr::filter (Sampling.Depth.Type == 'Sfc') %>% 
+                          st_as_sf(coords = c('Long','Lat'), crs = 4326)
+Cart.niskin.mid.sf     <- Cart.niskin.pos %>%  dplyr::filter (Sampling.Depth.Type == 'Mid') %>% 
+                          st_as_sf(coords = c('Long','Lat'), crs = 4326)
+Cart.niskin.chlmax.sf  <- Cart.niskin.pos %>%  dplyr::filter (Sampling.Depth.Type == 'Chl.max') %>% 
+                          st_as_sf(coords = c('Long','Lat'), crs = 4326)
+Cart.niskin.btm.sf     <- Cart.niskin.pos %>%  dplyr::filter (Sampling.Depth.Type == 'Btm') %>% 
+                          st_as_sf(coords = c('Long','Lat'), crs = 4326)
+
+Cart.trawl.sf <- st_as_sf(Cart.trawl, coords = c('Long','Lati'), crs = 4326) # Select BTS stations
+
+base.trawl <- base.map +
+  geom_sf(data=Cart.trawl.sf, x = 'Long', y = 'Lati', pch = 16, size = 1) +
+  annotate(geom = "text", x = -74, y = 42.5, label = "C. arctifrons", color="white", size=5, fontface = 'italic') +
+   annotate(geom = "text", x = -74, y = 42.1, label = "• BTS", color = "white", size = 4.5, fontface = 'bold') 
+
+DeepMaps <- function(Spplayer, Dtype) { 
+  base.trawl + # Surface
+ geom_sf(data=Spplayer, pch = 'X', size = 5, color = 'red') +
+   coord_sf( xlim = c(-75.5, -65.6), ylim = c(35.5, 42.5) ) +
+  annotate(geom = "text", x = -74, y = 41.7, label = Dtype, color = "white", size = 4.5, fontface = 'bold')
+}   
+
+DeepMaps (Cart.niskin.sfc.sf, "X Sfc eDNA")
+  ggsave("BTSeDNAstations20190405Cartsfc.png")
+  
+DeepMaps (Cart.niskin.mid.sf, "X Mid eDNA")
+  ggsave("BTSeDNAstations20190405Cartmid.png")
+
+DeepMaps (Cart.niskin.chlmax.sf, "X Chl.max eDNA")
+ggsave("BTSeDNAstations20190405Cartchlmax.png")
+
+DeepMaps (Cart.niskin.btm.sf, "X Btm eDNA")
+  ggsave("BTSeDNAstations20190405Cartbtm.png")
+
+```
+
+These maps confirm wide shelf distribution by C. arctifrons except in the Gulf of Maine. The eDNA signals at the surface were mostly inshore, whereas sampling at other depth types showed a more offshore distribution. Sampling at the Chl maximum depth showed a positive signal at only one station, which was very low compared to the positive stations at the other depth types (4-6 of 19 stations).
+
+
+
+Next, we do this also for a common, shelf-wide flatfish: Summer Flounder, *Paralichthys dentatus*. This flatfish species is managed by the Mid-Atlantic Fishery Management Council.
+
+```{r mapping a important fishery species, summer flounder: Paralichthys dentatus, Seq_26.other7ASVs, message=FALSE}
+
+Pden.niskin.all <- merge(dat.niskin, Pden, by = c("Station","Filtration.Volume", "Sampling.Depth.Type", "Sampling.Depth.Meter")) 
+Pden.niskin.pos <- Pden.niskin.all %>%  dplyr::filter (Seq_26.other7ASVs > 0)
+
+Pden.niskin.sfc.sf     <- Pden.niskin.pos %>%  dplyr::filter (Sampling.Depth.Type == 'Sfc')  %>% 
+                          st_as_sf(coords = c('Long','Lat'), crs = 4326)
+Pden.niskin.mid.sf     <- Pden.niskin.pos %>%  dplyr::filter (Sampling.Depth.Type == 'Mid')  %>% 
+                          st_as_sf(coords = c('Long','Lat'), crs = 4326)
+Pden.niskin.chlmax.sf <- Pden.niskin.pos %>%  dplyr::filter (Sampling.Depth.Type == 'Chl.max')  %>% 
+                          st_as_sf(coords = c('Long','Lat'), crs = 4326)
+Pden.niskin.btm.sf     <- Pden.niskin.pos %>%  dplyr::filter (Sampling.Depth.Type == 'Btm')  %>% 
+                          st_as_sf(coords = c('Long','Lat'), crs = 4326)
+
+Pden.trawl.sf <- st_as_sf(Pden.trawl, coords = c('Long','Lati'), crs = 4326) # Select BTS stations
+
+base.trawl <- base.map +
+  geom_sf(data=Pden.trawl.sf, x = 'Long', y = 'Lati', pch = 16, size = 1) +
+  annotate(geom = "text", x = -74, y = 42.5, label = "P. dentatus", color="white", size=5, fontface = 'italic') +
+   annotate(geom = "text", x = -74, y = 42.1, label = "• BTS", color = "white", size = 4.5, fontface = 'bold') 
+
+DeepMaps <- function(Spplayer, Dtype) { 
+  base.trawl + # Surface
+ geom_sf(data=Spplayer, pch = 'X', size = 5, color = 'red') +
+   coord_sf( xlim = c(-75.5, -65.6), ylim = c(35.5, 42.5) ) +
+  annotate(geom = "text", x = -74, y = 41.7, label = Dtype, color = "white", size = 4.5, fontface = 'bold')
+}   
+
+DeepMaps (Pden.niskin.sfc.sf, "X Sfc eDNA")
+  ggsave("BTSeDNAstations20190405_Pden.sfc.png")
+  
+DeepMaps (Pden.niskin.mid.sf, "X Mid eDNA")
+  ggsave("BTSeDNAstations20190405_Pden.mid.png")
+
+DeepMaps (Pden.niskin.chlmax.sf, "X Chl.max eDNA")
+ggsave("BTSeDNAstations20190405_Pden.chlmax.png")
+
+DeepMaps (Pden.niskin.btm.sf, "X Btm eDNA")
+  ggsave("BTSeDNAstations20190405_Pden.btm.png")
+
+
+```
+
+As expected, trawl catches show this species is widely distributed across the shelf, and as has been noted in recent years, its distribution is extending across Georges Bank and into the southern Gulf of Maine. The eDNA stations did not show the presence of summer flounder on Georges Bank or in the Gulf of Maine. In particular, again, samples at the Chl max layer marked only one positive station, whereas the other depth layers showed 4-6 positive stations.
+
+Next, we do this also for related paralichtid, Fourspot Flounder, *Paralichthys oblongus*. 
+
+```{r mapping a important fishery species, Fourspot flounder: Paralichthys oblongus, Seq_116, message=FALSE}
+
+Pobl.niskin.all <- merge(dat.niskin, Pobl, by = c("Station","Filtration.Volume", "Sampling.Depth.Type", "Sampling.Depth.Meter")) 
+Pobl.niskin.pos <- Pobl.niskin.all %>%  dplyr::filter (Seq_116 > 0)
+
+Pobl.niskin.sfc.sf     <- Pobl.niskin.pos %>%  dplyr::filter (Sampling.Depth.Type == 'Sfc')  %>% 
+                          st_as_sf(coords = c('Long','Lat'), crs = 4326)
+Pobl.niskin.mid.sf     <- Pobl.niskin.pos %>%  dplyr::filter (Sampling.Depth.Type == 'Mid')  %>% 
+                          st_as_sf(coords = c('Long','Lat'), crs = 4326)
+Pobl.niskin.chlmax.sf <- Pobl.niskin.pos %>%  dplyr::filter (Sampling.Depth.Type == 'Chl.max')  %>% 
+                          st_as_sf(coords = c('Long','Lat'), crs = 4326)
+Pobl.niskin.btm.sf     <- Pobl.niskin.pos %>%  dplyr::filter (Sampling.Depth.Type == 'Btm')  %>% 
+                          st_as_sf(coords = c('Long','Lat'), crs = 4326)
+
+Pobl.trawl.sf <- st_as_sf(Pobl.trawl, coords = c('Long','Lati'), crs = 4326) # Select BTS stations
+
+base.trawl <- base.map +
+  geom_sf(data=Pobl.trawl.sf, x = 'Long', y = 'Lati', pch = 16, size = 1) +
+  annotate(geom = "text", x = -74, y = 42.5, label = "P. oblongus", color="white", size=5, fontface = 'italic') +
+   annotate(geom = "text", x = -74, y = 42.1, label = "• BTS", color = "white", size = 4.5, fontface = 'bold') 
+
+DeepMaps <- function(Spplayer, Dtype) { 
+  base.trawl + # Surface
+ geom_sf(data=Spplayer, pch = 'X', size = 5, color = 'red') +
+   coord_sf( xlim = c(-75.5, -65.6), ylim = c(35.5, 42.5) ) +
+  annotate(geom = "text", x = -74, y = 41.7, label = Dtype, color = "white", size = 4.5, fontface = 'bold')
+}   
+
+DeepMaps (Pobl.niskin.sfc.sf, "X Sfc eDNA")
+  ggsave("BTSeDNAstations20190405_Pobl.sfc.png")
+  
+DeepMaps (Pobl.niskin.mid.sf, "X Mid eDNA")
+  ggsave("BTSeDNAstations20190405_Pobl.mid.png")
+
+DeepMaps (Pobl.niskin.chlmax.sf, "X Chl.max eDNA")
+ggsave("BTSeDNAstations20190405_Pobl.chlmax.png")
+
+DeepMaps (Pobl.niskin.btm.sf, "X Btm eDNA")
+  ggsave("BTSeDNAstations20190405_Pobl.btm.png")
+
+
+```
+
+The eDNA distribution of Fourspot Flounder as best depicted from the bottom samples, with three broadly distributed positive hits, whereas only a single hit was evident for the other depth types.
+
+Next, we do this also for a deepwater flatfish: Witch Flounder, *Glyptocephalus cynoglossus*. This flatfish species had a more restricted distribution within this geographic region, concentrated in the Gulf of Maine and in deep, slope waters. It is managed by the New England Fishery Management Council.
+
+```{r mapping witch flounder: Glyptocephalus cynoglossus, Seq_151.891, a deepwater, fishery flounder, message=FALSE}
+
+# See all stations chunk for some subroutines
+
+Gcyn.niskin.all <- merge(dat.niskin, Gcyn, by = c("Station","Filtration.Volume", "Sampling.Depth.Type", "Sampling.Depth.Meter")) 
+Gcyn.niskin.pos <- Gcyn.niskin.all %>%  dplyr::filter (Seq_151.891 > 0)
+
+Gcyn.niskin.sfc.sf     <- Gcyn.niskin.pos %>%  dplyr::filter (Sampling.Depth.Type == 'Sfc')  %>% 
+                          st_as_sf(coords = c('Long','Lat'), crs = 4326)
+Gcyn.niskin.mid.sf     <- Gcyn.niskin.pos %>%  dplyr::filter (Sampling.Depth.Type == 'Mid')  %>% 
+                          st_as_sf(coords = c('Long','Lat'), crs = 4326)
+Gcyn.niskin.chlmax.sf <- Gcyn.niskin.pos %>%  dplyr::filter (Sampling.Depth.Type == 'Chl.max')  %>% 
+                          st_as_sf(coords = c('Long','Lat'), crs = 4326)
+Gcyn.niskin.btm.sf     <- Gcyn.niskin.pos %>%  dplyr::filter (Sampling.Depth.Type == 'Btm')  %>% 
+                          st_as_sf(coords = c('Long','Lat'), crs = 4326)
+
+Gcyn.trawl.sf <- st_as_sf(Gcyn.trawl, coords = c('Long','Lati'), crs = 4326) # Select BTS stations
+
+base.trawl <- base.map +
+  geom_sf(data=Gcyn.trawl.sf, x = 'Long', y = 'Lati', pch = 16, size = 1) +
+  annotate(geom = "text", x = -74, y = 42.5, label = "G. cynoglossus", color="white", size=5, fontface = 'italic') +
+   annotate(geom = "text", x = -74, y = 42.1, label = "• BTS", color = "white", size = 4.5, fontface = 'bold') 
+
+DeepMaps <- function(Spplayer, Dtype) { 
+  base.trawl + # Surface
+ geom_sf(data=Spplayer, pch = 'X', size = 5, color = 'red') +
+   coord_sf( xlim = c(-75.5, -65.6), ylim = c(35.5, 42.5) ) +
+  annotate(geom = "text", x = -74, y = 41.7, label = Dtype, color = "white", size = 4.5, fontface = 'bold')
+}   
+
+DeepMaps (Gcyn.niskin.sfc.sf, "X Sfc eDNA")
+  ggsave("BTSeDNAstations20190405_Gcyn.sfc.png")
+  
+DeepMaps (Gcyn.niskin.mid.sf, "X Mid eDNA")
+  ggsave("BTSeDNAstations20190405_Gcyn.mid.png")
+
+DeepMaps (Gcyn.niskin.chlmax.sf, "X Chl.max eDNA")
+ggsave("BTSeDNAstations20190405_Gcyn.chlmax.png")
+
+DeepMaps (Gcyn.niskin.btm.sf, "X Btm eDNA")
+  ggsave("BTSeDNAstations20190405_Gcyn.btm.png")
+    
+
+```
+    
+As expected, Witch Flounder was distributed in deeper, colder waters: in the Gulf of Maine and when further south, on the shelf break or slope. Sampling by eDNA depicted this distribution a bottom water stations (3 positive stations), but less so at other sample depths (0-1 positive stations).
+  
+This manner of mapping species is a good start at describing the eDNA results relative to bottom trawl. Another way to assess the eDNA results is to comprehensively assess the positive stations by sampling depth and depth type in a 2-way ANOVA design. We do that here from all flatfishes detected by eDNA.
+
+
+``` {r a function to check for effect of sample depth on presence/absence}
+# Anova of sampling depth type
+# library(RVAideMemoire)    GIVES THE SAME PROB AS lm
+# chisq.bintest(there ~ Sampling.Depth.Type, data = Cart.niskin.all, correct = TRUE, alpha = 0.05, p.method = "fdr")
+
+RealFreq <- function(Sppx, Seqx, binomen) { 
+
+Flat01.niskin <- merge(dat.niskin, Sppx, by = c("Station","Filtration.Volume", "Sampling.Depth.Type", "Sampling.Depth.Meter"))
+
+Flat01.niskin$there <- ifelse(Flat01.niskin[[Seqx]] > 0, 1, 0) #['new']
+Flat01.niskin.pos <-  dplyr::filter (Flat01.niskin, there == 1)
+Flat01.niskin$deep <- as.factor(ifelse(Flat01.niskin$Depth < 31, '<= 30 m', 
+                                       ifelse((Flat01.niskin$Depth > 30 & Flat01.niskin$Depth < 100), '31-100 m', '> 100 m'))) #Make depth a binary variable at 50m
+
+Flat01.niskin$Sampling.Depth.Type <- factor(Flat01.niskin$Sampling.Depth.Type, levels = c('Sfc', 'Chl.max', 'Mid', 'Btm'))
+Flat01.niskin$deep <- factor(Flat01.niskin$deep, levels = c('<= 30 m', '31-100 m', '> 100 m'))
+
+#lm1 <- lm(there ~ Sampling.Depth.Type, data = Flat01.niskin)          
+lm1 <- summary(aov(glm(there ~ Sampling.Depth.Type*deep, data = Flat01.niskin)))
+summary(lm1)
+print (lm1)
+#Fst <- anova(lm1)
+#Fst
+
+Flat01.depth <- data.frame(                                           
+     Depth.Type =factor(Flat01.niskin$Sampling.Depth.Type),        
+     Depth.Level=factor(Flat01.niskin$deep),        
+     outcome=Flat01.niskin$there) %>%                                 
+     group_by(Depth.Type, Depth.Level) %>% 
+     summarize(n=n(), p=mean(as.numeric(as.character(outcome)))) %>%
+     mutate(se=sqrt(p*(1-p)/n))
+print(Flat01.depth)                                                            
+
+# visualizing with barplot + errorbar
+
+Talk_Theme = theme(
+  axis.title.x = element_text(size = 16),
+  axis.text.x = element_text(size = 14),
+  axis.title.y = element_text(size = 16),
+  axis.text.y = element_text(size = 14))
+  
+  ggplot(data=Flat01.depth, aes(x=Depth.Level, y=p, fill = Depth.Type)) +  
+  coord_cartesian(ylim=c(0,1.0)) + 
+  geom_bar(stat='identity', position='dodge') +
+  #geom_errorbar(stat='identity', position='dodge',
+  geom_errorbar(stat='identity', position = position_dodge(0.9), colour="black", 
+    width=0.5,
+    aes(
+      ymin=p-1.96*se, 
+      ymax = p + 1.96*se)
+  ) +
+  annotate(geom = 'text', x='> 100 m', y = 0.95, label = binomen, fontface = 'italic', size = 7) +   # Species specific
+  annotate(geom = 'text', x='> 100 m', y = 0.85, label = paste(min(Flat01.niskin.pos$Depth), ' — ', max(Flat01.niskin.pos$Depth), 'm'), size = 5) +                   
+#  annotate(geom = 'text', x="Btm", y = 0.44, label = paste('     Prob. =', signif(sum(Fst[[5]], na.rm = TRUE), 2), '(ns)'), size = 5) +                 # Stat specific        
+  xlab ("Sampling Depth (m)") +
+  ylab ("Proportion (eDNA)") +
+  Talk_Theme
+}
+
+RealFreq(Brob, "Seq_63.392.787.1185",    'B. robinsi')
+RealFreq(Emic, "Seq_68.795.664.1198",    'E. microstomus')
+RealFreq(Saqu, "Seq_11.161.766.940.381", 'S. aquosus')
+RealFreq(Cart, "Seq_42.894",             'C. arctifrons')
+RealFreq(Pden, "Seq_26.other7ASVs",      'P. dentatus')
+RealFreq(Pobl, "Seq_116",                'P. oblongus')
+RealFreq(Gcyn, "Seq_151.891",            'G. cynoglossus')
+RealFreq(Spap, 'Seq_36',                 'S. papillosum')
+RealFreq(Hhip, "Seq_274",                'H. hippoglossus')
+
+```
+
+## Conclusions
+
+The geographic distributions of these flatfishes, as measured with eDNA was largely as expected in terms of inshore-offshore, or presence by latitude or on/off Georges Bank and in/out of the Gulf of Maine. The sampling depth appears to matter quite a bit with eDNA presence/absence. Surface samples were reasonably good at detecting flatfishes. Nonetheless, comparing distributions from surface samples may differ than bottom samples. The Chl max layer was less informative then expected but it was only measured at 12 instead of 19 stations as the other sampling depths. These types of analyses are warranted for species other than the flatfishes to look for consistency in these patterns.
+
+
+

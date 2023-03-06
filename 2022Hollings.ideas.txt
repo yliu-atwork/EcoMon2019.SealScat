@@ -1,0 +1,4 @@
+2022 Hollings ideas:
+Work out the primer trimming package.
+Work out the R workflow. For example: filter out ASVs < (total reads)/5000 per taxon and per library.
+Work out R command lines to select from Fasta file sequences with a certain label?

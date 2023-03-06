@@ -1,0 +1,13 @@
+Diversity recovered:
+A table.
+
+Different volumne:
+Compare # of ASV detected just nextSeq)
+Compare Shannon index (just next Seq and including MiSeq)
+Multivariate analysis clustering pattern (do 1-, 2-, 3- L samples cluster?)
+
+Biogeographical check of all samples (horizontally and vertically):
+just nextSeq 2L samples?
+
+CM matters to fish diversity?
+Vertical profile of shannon indices of all stations.

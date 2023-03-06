@@ -1,0 +1,13 @@
+In Bioedit:
+Compile all sequences together in Bioedit (Copy sequences from the master list, and ctrl+v to new file)
+To rename sequences to add taxonomy information, no space should be in the name. Can use hyphen (-) or period (.) instead.
+Ctrl+A, under "Accessory Application", ClustalW Multiple Alignment.
+Save the alignment file in .fas format.
+
+In Mega:
+Under File, Convert File Format to Mega.
+Choose the alignment file saved in Bioedit just now to generate a .meg file.
+From the main menu, click Phylogeny.
+Choose Construct/Test Neighbor-joining tree. Test of Phylogeny: Bootstrap method; No. of Bootstrap Replications: 500;
+Model/Method:Kimura 2-parameter model; Rates among Sites: Gamma Distributed (G); Gamma Parameter:2.00
+
